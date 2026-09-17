@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Launcher: builds on first run, then starts the player attached to this terminal.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+jar="$here/target/playerTerm.jar"
+
+newest_source=$(find "$here/src" -name '*.java' -newer "$jar" -print -quit 2>/dev/null || true)
+if [[ ! -f "$jar" || -n "$newest_source" ]]; then
+    echo "building playerTerm..." >&2
+    (cd "$here" && mvn -o -q package -DskipTests)
+fi
+
+exec java -jar "$jar" "$@"
