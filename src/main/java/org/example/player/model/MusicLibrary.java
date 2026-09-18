@@ -21,6 +21,8 @@ public final class MusicLibrary {
     /** Formats the player accepts. ffmpeg decodes all of them. */
     public static final Set<String> EXTENSIONS = Set.of("mp3", "flac", "wav", "ogg", "oga");
     private static final int MAX_DEPTH = 12;
+    private static final Comparator<Path> BY_NAME =
+            Comparator.comparing(p -> p.getFileName().toString(), MusicLibrary::compareNatural);
 
     private final Path root;
     private final MusicFolder tree;
@@ -81,14 +83,14 @@ public final class MusicLibrary {
             return;
         }
 
-        dirs.sort(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)));
+        dirs.sort(BY_NAME);
         for (Path dir : dirs) {
             MusicFolder child = new MusicFolder(dir, dir.getFileName().toString(), folder);
             scan(child, depth + 1, seen);
             folder.children().add(child);
         }
 
-        files.sort(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)));
+        files.sort(BY_NAME);
         for (Path file : files) folder.tracks().add(new Track(file));
     }
 
@@ -101,6 +103,44 @@ public final class MusicLibrary {
             trackCount += folder.tracks().size();
         }
         return keep;
+    }
+
+    /**
+     * Case-insensitive order that reads runs of digits as numbers, so
+     * "2 Song" sorts before "10 Song" and "Disc 2" before "Disc 10".
+     */
+    static int compareNatural(String a, String b) {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            char ca = a.charAt(i);
+            char cb = b.charAt(j);
+            if (Character.isDigit(ca) && Character.isDigit(cb)) {
+                int startA = i;
+                int startB = j;
+                while (i < a.length() && Character.isDigit(a.charAt(i))) i++;
+                while (j < b.length() && Character.isDigit(b.charAt(j))) j++;
+                // Compare as numbers without parsing, so long runs cannot overflow.
+                String na = stripZeros(a.substring(startA, i));
+                String nb = stripZeros(b.substring(startB, j));
+                if (na.length() != nb.length()) return Integer.compare(na.length(), nb.length());
+                int cmp = na.compareTo(nb);
+                if (cmp != 0) return cmp;
+            } else {
+                int cmp = Character.compare(Character.toLowerCase(ca), Character.toLowerCase(cb));
+                if (cmp != 0) return cmp;
+                i++;
+                j++;
+            }
+        }
+        int cmp = Integer.compare(a.length() - i, b.length() - j);
+        return cmp != 0 ? cmp : a.compareTo(b);
+    }
+
+    private static String stripZeros(String digits) {
+        int k = 0;
+        while (k < digits.length() - 1 && digits.charAt(k) == '0') k++;
+        return digits.substring(k);
     }
 
     public static boolean isAudio(String fileName) {
