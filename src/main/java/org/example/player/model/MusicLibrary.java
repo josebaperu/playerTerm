@@ -19,7 +19,7 @@ import java.util.Set;
 public final class MusicLibrary {
 
     /** Formats the player accepts. ffmpeg decodes all of them. */
-    public static final Set<String> EXTENSIONS = Set.of("mp3", "flac", "wav", "ogg", "oga");
+    public static final Set<String> EXTENSIONS = Set.of("mp3", "flac", "wav", "ogg", "oga", "opus");
     private static final int MAX_DEPTH = 12;
     private static final Comparator<Path> BY_NAME =
             Comparator.comparing(p -> p.getFileName().toString(), MusicLibrary::compareNatural);

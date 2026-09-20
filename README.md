@@ -24,7 +24,7 @@ party libraries.
 ./playerTerm ~/Downloads     # or any folder you name
 ```
 
-Plays **mp3, flac, wav and ogg**. Anything else in the folder — artwork, cue
+Plays **mp3, flac, wav, ogg and opus**. Anything else in the folder — artwork, cue
 sheets, text files — is ignored, and folders that contain no audio anywhere
 beneath them never appear.
 
