@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,8 +30,11 @@ public final class TagReader implements AutoCloseable {
     public void requestFolder(MusicFolder folder) {
         if (folder == null || folder.tagsRequested() || folder.tracks().isEmpty()) return;
         folder.markTagsRequested();
+        // Snapshot so a library reload can replace the live list without
+        // colliding with this iteration.
+        List<Track> tracks = List.copyOf(folder.tracks());
         workers.submit(() -> {
-            for (Track track : folder.tracks()) {
+            for (Track track : tracks) {
                 if (Thread.currentThread().isInterrupted()) return;
                 read(track);
             }

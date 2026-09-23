@@ -14,6 +14,8 @@ public final class MusicFolder {
     private final List<Track> tracks = new ArrayList<>();
     private boolean expanded;
     private volatile boolean tagsRequested;
+    /** Set when a reload finds new tracks in a folder that was already probed. */
+    private volatile boolean retag;
 
     public MusicFolder(Path path, String name, MusicFolder parent) {
         this.path = path;
@@ -63,6 +65,21 @@ public final class MusicFolder {
 
     public void markTagsRequested() {
         tagsRequested = true;
+    }
+
+    public void clearTagsRequested() {
+        tagsRequested = false;
+    }
+
+    public void markRetag() {
+        retag = true;
+    }
+
+    /** Returns whether this folder should be probed again, and clears the flag. */
+    public boolean takeRetag() {
+        boolean pending = retag;
+        retag = false;
+        return pending;
     }
 
     /** Depth below the library root, used to indent the tree. */

@@ -6,9 +6,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -33,7 +35,19 @@ public final class MusicLibrary {
         this.root = root;
         this.tree = new MusicFolder(root, root.getFileName() == null ? root.toString()
                 : root.getFileName().toString(), null);
-        scan(tree, 0, new HashSet<>());
+        reconcile(tree, 0, new HashSet<>());
+        prune(tree);
+    }
+
+    /**
+     * Re-reads the tree from disk. Folders that are still there keep their
+     * expansion, and files that are still there keep their tags. New audio
+     * shows up; deleted files and emptied folders disappear.
+     */
+    public void reload() {
+        trackCount = 0;
+        folderCount = 0;
+        reconcile(tree, 0, new HashSet<>());
         prune(tree);
     }
 
@@ -57,15 +71,25 @@ public final class MusicLibrary {
         return !tree.hasContent();
     }
 
-    private void scan(MusicFolder folder, int depth, Set<Path> seen) {
+    /**
+     * Fills {@code folder} from the directory it points at. Existing children
+     * and tracks are reused so expansion state and tags survive a reload.
+     */
+    private void reconcile(MusicFolder folder, int depth, Set<Path> seen) {
         if (depth > MAX_DEPTH) return;
         Path real;
         try {
             real = folder.path().toRealPath();
         } catch (IOException e) {
+            folder.children().clear();
+            folder.tracks().clear();
             return;
         }
-        if (!seen.add(real)) return;   // symlink loop
+        if (!seen.add(real)) {   // symlink loop
+            folder.children().clear();
+            folder.tracks().clear();
+            return;
+        }
 
         List<Path> dirs = new ArrayList<>();
         List<Path> files = new ArrayList<>();
@@ -80,18 +104,49 @@ public final class MusicLibrary {
                 }
             }
         } catch (IOException e) {
+            folder.children().clear();
+            folder.tracks().clear();
             return;
         }
 
         dirs.sort(BY_NAME);
+        Map<Path, MusicFolder> existingFolders = new HashMap<>();
+        for (MusicFolder child : folder.children()) existingFolders.put(key(child.path()), child);
+        List<MusicFolder> nextChildren = new ArrayList<>();
         for (Path dir : dirs) {
-            MusicFolder child = new MusicFolder(dir, dir.getFileName().toString(), folder);
-            scan(child, depth + 1, seen);
-            folder.children().add(child);
+            MusicFolder child = existingFolders.get(key(dir));
+            if (child == null) child = new MusicFolder(dir, dir.getFileName().toString(), folder);
+            reconcile(child, depth + 1, seen);
+            nextChildren.add(child);
         }
+        folder.children().clear();
+        folder.children().addAll(nextChildren);
 
         files.sort(BY_NAME);
-        for (Path file : files) folder.tracks().add(new Track(file));
+        Map<Path, Track> existingTracks = new HashMap<>();
+        for (Track track : folder.tracks()) existingTracks.put(key(track.path()), track);
+        List<Track> nextTracks = new ArrayList<>();
+        boolean added = false;
+        for (Path file : files) {
+            Track track = existingTracks.get(key(file));
+            if (track == null) {
+                track = new Track(file);
+                added = true;
+            }
+            nextTracks.add(track);
+        }
+        folder.tracks().clear();
+        folder.tracks().addAll(nextTracks);
+        // Titles for files that arrived in a folder the user already opened.
+        // A folder that was never expanded stays unread.
+        if (added && (folder.tagsRequested() || folder.isExpanded())) {
+            folder.clearTagsRequested();
+            folder.markRetag();
+        }
+    }
+
+    private static Path key(Path path) {
+        return path.toAbsolutePath().normalize();
     }
 
     /** Drops branches that contain no audio at all, such as a folder of artwork. */

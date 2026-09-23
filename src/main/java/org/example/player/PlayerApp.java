@@ -215,6 +215,7 @@ public final class PlayerApp {
 
         if (key.type() == Key.Type.TAB || key.type() == Key.Type.SHIFT_TAB) {
             focus = focus == Focus.LIBRARY ? Focus.EQUALIZER : Focus.LIBRARY;
+            reloadLibrary();
             return;
         }
         if (key.is('q')) {
@@ -554,6 +555,28 @@ public final class PlayerApp {
     private void moveSelection(int delta) {
         if (rows.isEmpty()) return;
         selected = Math.max(0, Math.min(rows.size() - 1, selected + delta));
+    }
+
+    /** Picks up files added or removed since the last time the tree was read. */
+    private void reloadLibrary() {
+        int tracks = library.trackCount();
+        int folders = library.folderCount();
+        library.reload();
+        rebuildRows();
+        requestFreshTags(library.tree());
+        lastClickRow = -1;
+        if (library.trackCount() == tracks && library.folderCount() == folders) return;
+        if (library.isEmpty()) {
+            note("no audio found in " + library.root());
+        } else {
+            note(library.trackCount() + " tracks in " + library.folderCount() + " folders");
+        }
+    }
+
+    /** Probes folders that gained files after their tags were already read. */
+    private void requestFreshTags(MusicFolder folder) {
+        if (folder.takeRetag()) tags.requestFolder(folder);
+        for (MusicFolder child : folder.children()) requestFreshTags(child);
     }
 
     /** Rebuilds the visible lines, keeping the cursor on the same row. */

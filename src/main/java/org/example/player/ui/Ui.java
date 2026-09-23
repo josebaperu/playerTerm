@@ -527,7 +527,7 @@ public final class Ui {
                 "  , / .             seek 5s back / on      g / G      top / bottom",
                 "  +/- / *           collapse all / expand all",
                 "",
-                "EQUALIZER  (tab switches panels)",
+                "EQUALIZER  (tab switches panels and reloads files)",
                 "  ← / →             select band            ↑ / ↓      band gain ±1 dB",
                 "  [ / ]             preset                 0-9        pick band",
                 "  e                 bypass                 r          reset to flat",
