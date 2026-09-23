@@ -345,16 +345,6 @@ public final class PlayerApp {
                     case 'g' -> selected = 0;
                     case 'G' -> selected = Math.max(0, rows.size() - 1);
                     case ' ' -> spaceOnSelection();
-                    case 'c' -> {
-                        library.collapseAll();
-                        rebuildRows();
-                        note("collapsed");
-                    }
-                    case 'o' -> {
-                        library.expandAll();
-                        rebuildRows();
-                        note("expanded");
-                    }
                     default -> { }
                 }
             }

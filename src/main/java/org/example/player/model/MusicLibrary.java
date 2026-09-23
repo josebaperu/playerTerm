@@ -226,21 +226,6 @@ public final class MusicLibrary {
         for (MusicFolder f = folder.parent(); f != null; f = f.parent()) f.setExpanded(true);
     }
 
-    public void collapseAll() {
-        forEachFolder(tree, f -> f.setExpanded(false));
-    }
-
-    public void expandAll() {
-        forEachFolder(tree, f -> f.setExpanded(true));
-    }
-
-    private void forEachFolder(MusicFolder folder, java.util.function.Consumer<MusicFolder> action) {
-        for (MusicFolder child : folder.children()) {
-            action.accept(child);
-            forEachFolder(child, action);
-        }
-    }
-
     /**
      * Resolves the music directory: an explicit path, then PLAYERTERM_MUSIC,
      * then the XDG music dir, then ~/Music.

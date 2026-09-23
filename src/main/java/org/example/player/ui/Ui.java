@@ -525,7 +525,6 @@ public final class Ui {
                 "  → / ←             expand / collapse      PgUp/PgDn  page",
                 "  n / b             next / previous track  s          stop",
                 "  , / .             seek 5s back / on      g / G      top / bottom",
-                "  +/- / *           collapse all / expand all",
                 "",
                 "EQUALIZER  (tab switches panels and reloads files)",
                 "  ← / →             select band            ↑ / ↓      band gain ±1 dB",
