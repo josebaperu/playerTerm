@@ -320,8 +320,9 @@ public final class Ui {
         }
 
         s.put(ix, y + 1, marquee(track.displayName(), iw, app.tick()), Theme.TITLE);
-        String by = track.artist().isEmpty() ? "" : track.artist();
-        if (!track.album().isEmpty()) by = by.isEmpty() ? track.album() : by + " · " + track.album();
+        String by = track.artist();
+        String album = albumWithoutPrefix(track.album(), by);
+        if (!album.isEmpty()) by = by.isEmpty() ? album : by + " · " + album;
         s.putClipped(ix, y + 2, by, iw, Theme.ACCENT);
 
         drawProgress(s, p, ix, progressRowFor(s.height()), iw);
@@ -572,6 +573,20 @@ public final class Ui {
     private static String sourceLabel(YtmApp app) {
         var source = app.library().source();
         return source != null ? source.toString() : app.library().root().toString();
+    }
+
+    /**
+     * Playlist names are saved as "Artist - Title", or "playlist - Title" for
+     * user playlists, so the artist line would repeat it. Drops that prefix.
+     */
+    private static String albumWithoutPrefix(String album, String artist) {
+        for (String prefix : new String[] { artist, "playlist" }) {
+            String lead = prefix + " - ";
+            if (!prefix.isEmpty() && album.regionMatches(true, 0, lead, 0, lead.length())) {
+                return album.substring(lead.length());
+            }
+        }
+        return album;
     }
 
     private static String spinner(long tick) {
