@@ -41,6 +41,31 @@
                     </archive>
                 </configuration>
             </plugin>
+            <plugin>
+                <!-- playerYTM.jar: the same classes, started at the YouTube Music player. -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>playerYTM-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <jar destfile="${project.build.directory}/playerYTM.jar"
+                                     basedir="${project.build.outputDirectory}">
+                                    <manifest>
+                                        <attribute name="Main-Class" value="org.example.ytm.Main"/>
+                                    </manifest>
+                                </jar>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
