@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,12 +19,18 @@ import java.util.Map;
 /**
  * The playlists from the newest export in the playlists folder. Each export is
  * a JSON array of {@code {id, title, url, updatedDate}}; only the most recently
- * written file counts, so a new download replaces the library.
+ * written file counts, so a new download replaces the library. The older
+ * exports are moved to the {@value #RECENT_DIR} subfolder, which keeps the
+ * newest {@value #RECENT_KEEP} of them.
  */
 public final class PlaylistLibrary {
 
     private static final Comparator<Playlist> BY_TITLE =
             Comparator.comparing(Playlist::name, PlaylistLibrary::compareNatural);
+
+    /** Older exports are moved here, beside the newest one. */
+    public static final String RECENT_DIR = "recent";
+    private static final int RECENT_KEEP = 10;
 
     private final Path root;
     private final List<Playlist> playlists = new ArrayList<>();
@@ -129,25 +136,56 @@ public final class PlaylistLibrary {
 
     /** The most recently written export in the folder, ignoring partial downloads. */
     private Path newestExport() {
-        Path best = null;
-        FileTime bestTime = null;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(root)) {
-            for (Path entry : stream) {
-                if (!isExport(entry.getFileName().toString()) || !Files.isRegularFile(entry)) continue;
-                FileTime time = Files.getLastModifiedTime(entry);
-                int cmp = bestTime == null ? 1 : time.compareTo(bestTime);
-                // Same timestamp: the exporter names files after the time, so the larger name is newer.
-                if (cmp > 0 || (cmp == 0 && entry.getFileName().toString()
-                        .compareTo(best.getFileName().toString()) > 0)) {
-                    best = entry;
-                    bestTime = time;
-                }
-            }
+        List<Path> exports;
+        try {
+            exports = exportsNewestFirst(root);
         } catch (IOException e) {
             problem = "cannot read " + root + ": " + e.getMessage();
             return null;
         }
-        return best;
+        if (exports.isEmpty()) return null;
+        archiveOlder(exports.subList(1, exports.size()));
+        return exports.get(0);
+    }
+
+    /**
+     * Moves every export but the newest into the recent folder, replacing a
+     * file of the same name there, then trims that folder to its newest
+     * {@link #RECENT_KEEP} exports. Trouble here never stops the reload.
+     */
+    private void archiveOlder(List<Path> older) {
+        Path recent = root.resolve(RECENT_DIR);
+        try {
+            if (!older.isEmpty()) Files.createDirectories(recent);
+            for (Path file : older) {
+                Files.move(file, recent.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (!Files.isDirectory(recent)) return;
+            List<Path> kept = exportsNewestFirst(recent);
+            for (Path extra : kept.subList(Math.min(RECENT_KEEP, kept.size()), kept.size())) {
+                Files.deleteIfExists(extra);
+            }
+        } catch (IOException e) {
+            problem = "cannot tidy " + recent + ": " + e.getMessage();
+        }
+    }
+
+    /** The exports directly inside a folder, newest first. */
+    private static List<Path> exportsNewestFirst(Path dir) throws IOException {
+        List<Path> exports = new ArrayList<>();
+        Map<Path, FileTime> times = new HashMap<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+            for (Path entry : stream) {
+                if (!isExport(entry.getFileName().toString()) || !Files.isRegularFile(entry)) continue;
+                exports.add(entry);
+                times.put(entry, Files.getLastModifiedTime(entry));
+            }
+        }
+        // Same timestamp: the exporter names files after the time, so the larger name is newer.
+        exports.sort(Comparator.comparing((Path e) -> times.get(e))
+                .thenComparing(e -> e.getFileName().toString())
+                .reversed());
+        return exports;
     }
 
     public static boolean isExport(String fileName) {
