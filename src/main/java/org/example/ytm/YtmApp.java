@@ -386,7 +386,7 @@ public final class YtmApp {
     private void togglePlaylist(Playlist playlist) {
         playlist.toggleExpanded();
         if (playlist.isExpanded() && playlist.load() == Playlist.Load.FAILED) {
-            loader.request(playlist);
+            loader.requestNow(playlist);
             note("retrying " + playlist.name());
         }
         rebuildRows();
@@ -446,11 +446,12 @@ public final class YtmApp {
                 case LOADED -> note(playlist.name() + " has no playable tracks");
                 case FAILED -> {
                     pendingPlay = playlist;
-                    loader.request(playlist);
+                    loader.requestNow(playlist);
                     note("retrying " + playlist.name());
                 }
                 default -> {
                     pendingPlay = playlist;
+                    loader.requestNow(playlist);
                     note("loading " + playlist.name() + "…");
                 }
             }
