@@ -129,6 +129,7 @@ public final class PlaylistLibrary {
             }
         }
         next.sort(BY_TITLE);
+        stale.sort(BY_TITLE);   // listed in the order they appear on screen
         playlists.clear();
         playlists.addAll(next);
         return stale;

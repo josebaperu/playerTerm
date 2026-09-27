@@ -26,10 +26,12 @@ public final class PlaylistLoader implements AutoCloseable {
         worker.start();
     }
 
-    /** Queues a playlist behind the others unless it is already being fetched. */
+    /** Queues a playlist behind the others unless it is already waiting or being fetched. */
     public void request(Playlist playlist) {
-        if (playlist == null || playlist.load() == Playlist.Load.LOADING) return;
-        playlist.markLoading();
+        if (playlist == null) return;
+        Playlist.Load load = playlist.load();
+        if (load == Playlist.Load.QUEUED || load == Playlist.Load.LOADING) return;
+        playlist.markQueued();
         queue.addLast(playlist);
     }
 
@@ -39,19 +41,18 @@ public final class PlaylistLoader implements AutoCloseable {
      * now is left alone.
      */
     public void requestNow(Playlist playlist) {
-        if (playlist == null) return;
-        if (playlist.load() == Playlist.Load.LOADING) {
-            if (queue.remove(playlist)) queue.addFirst(playlist);
-            return;
+        if (playlist == null || playlist.load() == Playlist.Load.LOADING) return;
+        if (queue.remove(playlist) || (playlist.load() != Playlist.Load.QUEUED && playlist.load() != Playlist.Load.LOADING)) {
+            playlist.markQueued();
+            queue.addFirst(playlist);
         }
-        playlist.markLoading();
-        queue.addFirst(playlist);
     }
 
     private void run() {
         try {
             while (true) {
                 Playlist playlist = queue.take();
+                playlist.markLoading();
                 try {
                     playlist.setTracks(YtDlp.listPlaylist(playlist.url(), playlist.name()));
                 } catch (InterruptedException e) {

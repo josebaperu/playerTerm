@@ -11,7 +11,7 @@ import java.util.Map;
  */
 public final class Playlist {
 
-    public enum Load { PENDING, LOADING, LOADED, FAILED }
+    public enum Load { PENDING, QUEUED, LOADING, LOADED, FAILED }
 
     private final String id;
     private volatile String title;
@@ -75,6 +75,10 @@ public final class Playlist {
 
     public Load load() {
         return load;
+    }
+
+    public void markQueued() {
+        load = Load.QUEUED;
     }
 
     public void markLoading() {

@@ -269,6 +269,7 @@ public final class Ui {
                 String suffix = switch (playlist.load()) {
                     case LOADED -> "  " + count;
                     case FAILED -> "  ✖";
+                    case QUEUED -> count > 0 ? "  " + count : "  ·";
                     default -> count > 0 ? "  " + count : "  " + spinner(app.tick());
                 };
                 int suffixStyle = playlist.load() == Playlist.Load.FAILED && !selected ? Theme.ALERT : dim;
