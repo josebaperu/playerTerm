@@ -107,6 +107,8 @@ playerYTM -h, --help            show help
 
 Volume, equalizer curve and the last track played are kept in
 `~/.config/playerytm/config.properties` (honouring `XDG_CONFIG_HOME`).
+Playlist listings are kept in `~/.cache/playerytm/playlists` (honouring
+`XDG_CACHE_HOME`) and reused until that playlist's link or date changes.
 
 These are kept apart from playerTerm's, so the two players never share a volume
 or equalizer curve.
@@ -126,10 +128,14 @@ immediately without interrupting playback. A soft knee limiter after the gain
 stage keeps heavy boosts from clipping.
 
 **Listing never touches the videos.** Every playlist in the export is listed
-by `yt-dlp --flat-playlist` on background threads as soon as it appears, which
-takes a second or two each; a spinner stands in for the track count until
-then. Pressing Enter on a playlist that is still listing plays it the moment
-its tracks arrive.
+by `yt-dlp --flat-playlist` on a background thread as soon as it appears.
+A listing saved for that same link and date is reused on the next launch, so
+yt-dlp does not scan the playlist again; a new playlist, or one whose link or
+date changed, still takes a second or two, and a spinner stands in for the
+track count until then. Pressing Enter on a playlist that is still listing
+plays it the moment its tracks arrive. The saved listing is the tracks
+themselves. The direct audio address of a track still expires, and is looked
+up again when that track is played.
 
 **Playing a playlist** hands its tracks to one session thread. For each track
 yt-dlp resolves the best audio stream (the header shows LOADING meanwhile),

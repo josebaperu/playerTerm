@@ -139,7 +139,10 @@ public final class YtmApp {
         loadSettings();
         library = new PlaylistLibrary(root);
         List<Playlist> fresh = library.reload();
-        if (fresh != null) fresh.forEach(loader::request);
+        if (fresh != null) {
+            fresh.forEach(loader::request);
+            loader.retain(library.playlists());
+        }
         rebuildRows();
         try {
             watcher = new PlaylistWatcher(root);
@@ -191,7 +194,8 @@ public final class YtmApp {
                 streams with yt-dlp and ffmpeg, one playlist at a time
 
                 playlists:  $PLAYERTERM_PLAYLISTS, then ~/Downloads/ytm_playlists
-                settings:   ~/.config/playerytm/config.properties""");
+                settings:   ~/.config/playerytm/config.properties
+                cache:      ~/.cache/playerytm/playlists""");
     }
 
     private void loop(Terminal terminal, Screen screen) {
@@ -620,6 +624,7 @@ public final class YtmApp {
             return;
         }
         stale.forEach(loader::request);
+        loader.retain(library.playlists());
         rebuildRows();
         lastClickRow = -1;
         announceLibrary();

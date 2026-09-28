@@ -6,8 +6,8 @@ import java.util.Map;
 
 /**
  * One entry of the playlist export: a title and a YouTube Music link. Its
- * tracks are fetched by yt-dlp on a background thread, so the list is swapped
- * in whole rather than edited in place.
+ * tracks come from a saved listing or from yt-dlp on a background thread, so
+ * the list is swapped in whole rather than edited in place.
  */
 public final class Playlist {
 
