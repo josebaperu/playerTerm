@@ -550,6 +550,7 @@ public final class Ui {
                 "",
                 "SOUND",
                 "  + / -             volume                 m          mute",
+                "  p / media key     pause or resume",
                 "  q                 quit",
                 "",
                 "PLAYLISTS  (new exports in this folder load by themselves)",
