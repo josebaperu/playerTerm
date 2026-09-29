@@ -18,6 +18,14 @@ public final class Ansi {
     public static final String MOUSE_ON = CSI + "?1000h" + CSI + "?1002h" + CSI + "?1006h";
     public static final String MOUSE_OFF = CSI + "?1006l" + CSI + "?1002l" + CSI + "?1000l";
 
+    /**
+     * Kitty keyboard protocol, disambiguate flag. Media keys have no legacy
+     * encoding, so terminals only deliver them once this mode is pushed.
+     * The alternate screen keeps its own stack; pop before leaving it.
+     */
+    public static final String KEYBOARD_DISAMBIGUATE = CSI + ">1u";
+    public static final String KEYBOARD_POP = CSI + "<u";
+
     public static String moveTo(int row, int col) {
         return CSI + row + ";" + col + "H";
     }

@@ -5,7 +5,7 @@ public record Key(Key.Type type, char ch, MouseEvent mouse) {
 
     public enum Type {
         CHAR, UP, DOWN, LEFT, RIGHT, ENTER, ESCAPE, BACKSPACE, TAB, SHIFT_TAB,
-        PAGE_UP, PAGE_DOWN, HOME, END, DELETE, MOUSE, NONE
+        PAGE_UP, PAGE_DOWN, HOME, END, DELETE, MEDIA_PLAY_PAUSE, MOUSE, NONE
     }
 
     public static final Key NONE = new Key(Type.NONE, '\0', null);

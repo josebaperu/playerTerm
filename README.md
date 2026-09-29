@@ -51,6 +51,7 @@ Resolved in this order, first hit wins:
 | `n` `b` | next / previous track (`b` restarts the track after 3 seconds in) |
 | `,` `.` | seek 5 seconds back / forward |
 | `p` `s` | pause or resume, stop |
+| play/pause | media key, pauses or resumes |
 | `PgUp` `PgDn` `g` `G` | page, top, bottom |
 
 | Equalizer (`tab` switches panels) | |

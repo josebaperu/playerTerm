@@ -34,6 +34,7 @@ public final class Terminal implements AutoCloseable {
         out.print(Ansi.HIDE_CURSOR);
         out.print(Ansi.CLEAR_SCREEN);
         if (mouseEnabled) out.print(Ansi.MOUSE_ON);
+        out.print(Ansi.KEYBOARD_DISAMBIGUATE);
         out.flush();
         refreshSize(true);
 
@@ -108,37 +109,112 @@ public final class Terminal implements AutoCloseable {
             Integer raw = poll(40);
             if (raw == null) return Key.of(Key.Type.ESCAPE);
             int code = raw;
-            if (code == '<') return readMouseReport();
-            switch (code) {
-                case 'A': return Key.of(Key.Type.UP);
-                case 'B': return Key.of(Key.Type.DOWN);
-                case 'C': return Key.of(Key.Type.RIGHT);
-                case 'D': return Key.of(Key.Type.LEFT);
-                case 'H': return Key.of(Key.Type.HOME);
-                case 'F': return Key.of(Key.Type.END);
-                case 'Z': return Key.of(Key.Type.SHIFT_TAB);
-                default: break;
-            }
-            if (code >= '0' && code <= '9') {
-                StringBuilder digits = new StringBuilder();
-                digits.append((char) code);
-                Integer c;
-                while ((c = poll(40)) != null) {
-                    if (c == '~' || (c >= 'A' && c <= 'Z')) break;
-                    digits.append((char) c.intValue());
-                }
-                return switch (digits.toString()) {
-                    case "1", "7" -> Key.of(Key.Type.HOME);
-                    case "3" -> Key.of(Key.Type.DELETE);
-                    case "4", "8" -> Key.of(Key.Type.END);
-                    case "5" -> Key.of(Key.Type.PAGE_UP);
-                    case "6" -> Key.of(Key.Type.PAGE_DOWN);
-                    default -> Key.NONE;
-                };
-            }
+            if (next == '[' && code == '<') return readMouseReport();
+            if (code >= 'A' && code <= 'Z') return functionLetter(code);
+            if (code >= '0' && code <= '9') return readParameterized(code);
             return Key.NONE;
         }
         return Key.of(Key.Type.ESCAPE);
+    }
+
+    /** {@code CSI A} / {@code SS3 A} and the other single-letter function keys. */
+    private static Key functionLetter(int code) {
+        return switch (code) {
+            case 'A' -> Key.of(Key.Type.UP);
+            case 'B' -> Key.of(Key.Type.DOWN);
+            case 'C' -> Key.of(Key.Type.RIGHT);
+            case 'D' -> Key.of(Key.Type.LEFT);
+            case 'H' -> Key.of(Key.Type.HOME);
+            case 'F' -> Key.of(Key.Type.END);
+            case 'Z' -> Key.of(Key.Type.SHIFT_TAB);
+            default -> Key.NONE;
+        };
+    }
+
+    /**
+     * A parameterized CSI sequence, {@code CSI number ; modifiers u} or
+     * {@code ~}. Play, pause and the combined play/pause key are the kitty
+     * protocol code points 57428, 57429 and 57430. A release (event type 3)
+     * is ignored.
+     */
+    private Key readParameterized(int firstDigit) {
+        StringBuilder body = new StringBuilder();
+        body.append((char) firstDigit);
+        int terminator = -1;
+        Integer c;
+        while ((c = poll(40)) != null) {
+            int ch = c;
+            if (ch == '~' || ch == 'u' || (ch >= 'A' && ch <= 'Z')) {
+                terminator = ch;
+                break;
+            }
+            if ((ch >= '0' && ch <= '9') || ch == ';' || ch == ':') {
+                body.append((char) ch);
+                continue;
+            }
+            return Key.NONE;
+        }
+        if (terminator < 0) return Key.NONE;
+        return decodeParameterized(body.toString(), terminator);
+    }
+
+    static Key decodeParameterized(String body, int terminator) {
+        String[] fields = body.split(";", -1);
+        int keyCode = leadingNumber(fields[0]);
+        int modifier = 1;
+        int eventType = 1;
+        if (fields.length >= 2 && !fields[1].isEmpty()) {
+            String[] sub = fields[1].split(":", -1);
+            if (!sub[0].isEmpty()) modifier = parseInt(sub[0], 1);
+            if (sub.length >= 2 && !sub[1].isEmpty()) eventType = parseInt(sub[1], 1);
+        }
+        if (eventType == 3) return Key.NONE;
+
+        int mods = Math.max(0, modifier - 1);
+        boolean shift = (mods & 1) != 0;
+        boolean alt = (mods & 2) != 0;
+        boolean ctrl = (mods & 4) != 0;
+
+        if (terminator == 'u') {
+            // Raw mode used to deliver ctrl-c / ctrl-d as bytes 3 and 4, which quit.
+            // Disambiguate mode sends them as CSI u instead.
+            if ((keyCode == 99 || keyCode == 100) && ctrl && !alt) return Key.ofChar('q');
+            return switch (keyCode) {
+                case 57428, 57429, 57430 -> Key.of(Key.Type.MEDIA_PLAY_PAUSE);
+                case 27 -> Key.of(Key.Type.ESCAPE);
+                case 13 -> Key.of(Key.Type.ENTER);
+                case 127, 8 -> Key.of(Key.Type.BACKSPACE);
+                case 9 -> Key.of(shift ? Key.Type.SHIFT_TAB : Key.Type.TAB);
+                default -> Key.NONE;
+            };
+        }
+        if (terminator == '~') {
+            return switch (keyCode) {
+                case 1, 7 -> Key.of(Key.Type.HOME);
+                case 3 -> Key.of(Key.Type.DELETE);
+                case 4, 8 -> Key.of(Key.Type.END);
+                case 5 -> Key.of(Key.Type.PAGE_UP);
+                case 6 -> Key.of(Key.Type.PAGE_DOWN);
+                default -> Key.NONE;
+            };
+        }
+        if (keyCode == 1) return functionLetter(terminator);
+        return Key.NONE;
+    }
+
+    /** The number before a ':' sub-field, or -1 when the field is not a number. */
+    private static int leadingNumber(String field) {
+        int cut = field.indexOf(':');
+        return parseInt(cut < 0 ? field : field.substring(0, cut), -1);
+    }
+
+    private static int parseInt(String text, int fallback) {
+        if (text == null || text.isEmpty()) return fallback;
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /**
@@ -222,6 +298,7 @@ public final class Terminal implements AutoCloseable {
     public synchronized void close() {
         if (closed) return;
         closed = true;
+        out.print(Ansi.KEYBOARD_POP);
         if (mouseEnabled) out.print(Ansi.MOUSE_OFF);
         out.print(Ansi.RESET);
         out.print(Ansi.SHOW_CURSOR);

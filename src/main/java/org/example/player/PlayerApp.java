@@ -241,7 +241,7 @@ public final class PlayerApp {
             note(player.isMuted() ? "muted" : "unmuted");
             return;
         }
-        if (key.is('p')) {
+        if (key.is('p') || key.type() == Key.Type.MEDIA_PLAY_PAUSE) {
             player.togglePause();
             return;
         }
