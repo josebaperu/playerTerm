@@ -2,6 +2,7 @@
 // @name         YTM Local Player Button
 // @match        https://music.youtube.com/*
 // @grant        GM_download
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (function () {
@@ -12,8 +13,9 @@
     var DIALOG_ID = 'tm-local-player-dialog';
     var SVG_NS = 'http://www.w3.org/2000/svg';
     var TRASH_PATH = 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z';
+    var dialogListBox = null;
 
-    console.log('[ALP] script started (v5 artist title) on', location.href);
+    console.log('[ALP] script started (v6 upload playlists) on', location.href);
 
     function makeId() {
         var hex = '0123456789abcdef';
@@ -162,6 +164,136 @@
         }
     }
 
+    // ---------- upload ----------
+
+    function isPlaylistEntry(item) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        if (typeof item.id !== 'string' || item.id.trim() === '') return false;
+        if (typeof item.title !== 'string') return false;
+        if (typeof item.url !== 'string' || item.url.trim() === '') return false;
+        if (typeof item.updatedDate !== 'number' || !isFinite(item.updatedDate)) return false;
+        return true;
+    }
+
+    function parsePlaylistExport(text) {
+        if (typeof text !== 'string') throw new Error('file is not text');
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        var parsed;
+        try {
+            parsed = JSON.parse(text);
+        } catch (e) {
+            throw new Error('file is not a JSON array');
+        }
+        if (!Array.isArray(parsed)) throw new Error('expected a JSON array');
+        for (var i = 0; i < parsed.length; i++) {
+            if (!isPlaylistEntry(parsed[i])) {
+                throw new Error('entry ' + (i + 1) + ' does not match the playlist contract');
+            }
+        }
+        return parsed;
+    }
+
+    function isTextPlaylistFile(file) {
+        if (!file) return false;
+        var name = (file.name || '').toLowerCase();
+        var type = (file.type || '').toLowerCase();
+        if (!name.endsWith('.txt')) return false;
+        if (!type) return true;
+        return type.indexOf('text/') === 0 || type === 'application/octet-stream';
+    }
+
+    function filePicker() {
+        var win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+        if (win && typeof win.showOpenFilePicker === 'function') {
+            return win.showOpenFilePicker.bind(win);
+        }
+        if (typeof showOpenFilePicker === 'function') return showOpenFilePicker.bind(window);
+        return null;
+    }
+
+    // One text file. Downloads when the browser can start there; otherwise the dialog's default, usually Home.
+    function pickerOptions() {
+        return {
+            multiple: false,
+            excludeAcceptAllOption: true,
+            startIn: 'downloads',
+            types: [{
+                description: 'Text',
+                accept: { 'text/plain': ['.txt'] }
+            }]
+        };
+    }
+
+    function readFileText(file) {
+        return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () { resolve(String(reader.result || '')); };
+            reader.onerror = function () { reject(reader.error || new Error('could not read file')); };
+            reader.readAsText(file);
+        });
+    }
+
+    function applyUploadedText(text) {
+        var list = parsePlaylistExport(text);
+        // Uploaded file replaces localPlaylist. Do not merge, update, or append.
+        saveList(list);
+        if (dialogListBox && document.body.contains(dialogListBox)) renderList(dialogListBox);
+        console.log('[ALP] replaced localPlaylist from upload, entries:', list.length);
+        return list;
+    }
+
+    function cancelled() {
+        var err = new Error('cancelled');
+        err.name = 'AbortError';
+        return err;
+    }
+
+    function chooseWithInput() {
+        return new Promise(function (resolve, reject) {
+            var input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'text/plain,.txt';
+            input.multiple = false;
+            input.style.display = 'none';
+            var settled = false;
+            function finish(err, file) {
+                if (settled) return;
+                settled = true;
+                input.remove();
+                if (err) reject(err);
+                else resolve(file);
+            }
+            input.addEventListener('change', function () {
+                var file = input.files && input.files[0];
+                if (!file) finish(cancelled());
+                else finish(null, file);
+            });
+            input.addEventListener('cancel', function () {
+                finish(cancelled());
+            });
+            document.body.appendChild(input);
+            input.click();
+        });
+    }
+
+    function choosePlaylistFile() {
+        var picker = filePicker();
+        if (!picker) {
+            console.log('[ALP] file picker API missing, using input (browser default folder, usually Home)');
+            return chooseWithInput();
+        }
+        try {
+            console.log('[ALP] opening file chooser in Downloads');
+            return Promise.resolve(picker(pickerOptions())).then(function (handles) {
+                if (!handles || !handles.length) throw cancelled();
+                return handles[0].getFile();
+            });
+        } catch (e) {
+            console.log('[ALP] Downloads chooser unavailable, using input', e);
+            return chooseWithInput();
+        }
+    }
+
     // ---------- edit dialog ----------
 
     function makeTrashIcon() {
@@ -179,6 +311,7 @@
     function closeDialog() {
         var dlg = document.getElementById(DIALOG_ID);
         if (dlg) dlg.remove();
+        dialogListBox = null;
         document.removeEventListener('keydown', onDialogKey, true);
         console.log('[ALP] dialog closed');
     }
@@ -191,6 +324,11 @@
         while (listBox.firstChild) listBox.removeChild(listBox.firstChild);
 
         var list = loadList();
+        list.sort(function (a, b) {
+            var ta = String((a && (a.title || a.url)) || '');
+            var tb = String((b && (b.title || b.url)) || '');
+            return ta.localeCompare(tb, undefined, { sensitivity: 'base', numeric: true });
+        });
         if (list.length === 0) {
             var empty = document.createElement('div');
             empty.textContent = 'No playlists saved yet.';
@@ -304,6 +442,7 @@
         document.body.appendChild(overlay);
         document.addEventListener('keydown', onDialogKey, true);
 
+        dialogListBox = listBox;
         renderList(listBox);
     }
 
@@ -324,6 +463,7 @@
         var wrap = document.createElement('div');
         wrap.id = 'tm-add-to-local-player';
         wrap.style.display = 'flex';
+        wrap.style.flexWrap = 'wrap';
         wrap.style.width = '100%';
         wrap.style.marginTop = '12px';
         wrap.style.justifyContent = 'center';
@@ -331,7 +471,7 @@
 
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = 'add to local player';
+        btn.textContent = 'add Playlist';
         styleButton(btn);
         btn.addEventListener('click', function () {
             console.log('[ALP] button clicked');
@@ -349,7 +489,7 @@
 
         var edit = document.createElement('button');
         edit.type = 'button';
-        edit.textContent = 'edit local';
+        edit.textContent = 'Manage Playlists';
         styleButton(edit);
         edit.addEventListener('click', function () {
             console.log('[ALP] edit local clicked');
@@ -360,8 +500,37 @@
             }
         });
 
+        var upload = document.createElement('button');
+        upload.type = 'button';
+        upload.textContent = 'Import Playlists';
+        styleButton(upload);
+        upload.addEventListener('click', function () {
+            console.log('[ALP] upload playlists clicked');
+            choosePlaylistFile().then(function (file) {
+                if (!isTextPlaylistFile(file)) throw new Error('file must be a text file');
+                return readFileText(file);
+            }).then(function (text) {
+                applyUploadedText(text);
+                upload.textContent = 'uploaded';
+                setTimeout(function () { upload.textContent = 'Upload Playlists'; }, 1500);
+            }).catch(function (e) {
+                if (e && e.name === 'AbortError') {
+                    console.log('[ALP] upload cancelled');
+                    return;
+                }
+                console.log('[ALP] upload FAILED:', e);
+                upload.textContent = 'invalid file';
+                upload.title = e && e.message ? e.message : 'invalid file';
+                setTimeout(function () {
+                    upload.textContent = 'Upload Playlists';
+                    upload.title = '';
+                }, 2000);
+            });
+        });
+
         wrap.appendChild(btn);
         wrap.appendChild(edit);
+        wrap.appendChild(upload);
         return wrap;
     }
 
