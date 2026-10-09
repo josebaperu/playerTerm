@@ -54,6 +54,7 @@ public final class Playlist {
         this.title = title;
         this.url = url;
         this.updatedDate = updatedDate;
+        for (Track track : tracks) track.setAlbum(title);
         return stale;
     }
 
@@ -69,6 +70,7 @@ public final class Playlist {
         Map<String, Track> known = new HashMap<>();
         for (Track t : tracks) known.put(t.id(), t);
         tracks = fresh.stream().map(t -> known.getOrDefault(t.id(), t)).toList();
+        for (Track track : tracks) track.setAlbum(title);
         error = "";
         load = Load.LOADED;
     }

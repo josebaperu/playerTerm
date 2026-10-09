@@ -4,6 +4,7 @@ import org.example.player.audio.Equalizer;
 import org.example.player.audio.FormatInfo;
 import org.example.player.audio.SpectrumAnalyzer;
 import org.example.ytm.model.Track;
+import org.example.ytm.source.TrackStore;
 import org.example.ytm.source.YtDlp;
 
 import javax.sound.sampled.AudioFormat;
@@ -11,15 +12,17 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Plays a queue of YouTube Music tracks: yt-dlp finds the audio stream,
- * ffmpeg decodes it, the equalizer shapes it, the sound card receives it. One
- * session thread owns the queue and handles pause, seek, track changes and
- * running on to the next track, whose stream is looked up ahead of time.
+ * Plays a queue of YouTube Music tracks. A track already saved in the music
+ * folder is played from that file. Otherwise yt-dlp finds the audio stream,
+ * ffmpeg decodes it, and the file is saved in the background for the next
+ * play. One session thread owns the queue and handles pause, seek, track
+ * changes and running on to the next track, which is looked up ahead of time.
  */
 public final class Player implements AutoCloseable {
 
@@ -38,6 +41,7 @@ public final class Player implements AutoCloseable {
         t.setDaemon(true);
         return t;
     });
+    private final TrackStore store = new TrackStore(TrackStore.defaultRoot());
 
     private volatile Session session;
     private volatile List<Track> queue = List.of();
@@ -100,6 +104,11 @@ public final class Player implements AutoCloseable {
 
     public String lastError() {
         return lastError;
+    }
+
+    /** Why the last save into the music folder failed, or empty when it did not. */
+    public String storeProblem() {
+        return store.problem();
     }
 
     public int volume() {
@@ -209,6 +218,11 @@ public final class Player implements AutoCloseable {
     public void close() {
         stop();
         prefetch.shutdownNow();
+        store.close();
+    }
+
+    /** A stream URL, or a file in the music folder. */
+    private record Located(String source, boolean fromDisk) {
     }
 
     private enum Request { NONE, NEXT, PREVIOUS, RESTART, SEEK }
@@ -266,7 +280,9 @@ public final class Player implements AutoCloseable {
         private void run() {
             int i = startIndex;
             double from = startAt;
-            boolean retried = false;
+            boolean retriedDisk = false;
+            boolean retriedStream = false;
+            boolean skipDisk = false;
             Outcome last = Outcome.FINISHED;
             while (!stopping && i >= 0 && i < queue.size()) {
                 index = i;
@@ -275,19 +291,29 @@ public final class Player implements AutoCloseable {
                 info.clear();
                 position = from;
 
-                boolean cached = track.streamUrl() != null;
-                String stream = resolve(track);
+                boolean remembered = track.streamUrl() != null;
+                Located located = open(track, i, skipDisk);
                 if (stopping) return;
-                if (stream != null) prefetchAfter(i);
-                Outcome outcome = stream == null ? Outcome.FAILED : playTrack(track, stream, from);
+                if (located != null) prefetchAfter(i);
+                Outcome outcome = located == null ? Outcome.FAILED : playTrack(track, located.source(), from);
                 if (stopping || outcome == Outcome.STOPPED) return;
-                if (outcome == Outcome.FAILED && cached && !retried) {
-                    // Remembered streams can be refused before their stated expiry.
-                    track.clearStream();
-                    retried = true;
+                if (outcome == Outcome.FAILED && located != null && located.fromDisk() && !retriedDisk) {
+                    // A file this player wrote is dropped. One already in the folder stays,
+                    // and this play continues from the stream.
+                    store.discard(track);
+                    retriedDisk = true;
+                    skipDisk = store.existing(track) != null;
                     continue;
                 }
-                retried = false;
+                if (outcome == Outcome.FAILED && remembered && !retriedStream) {
+                    // Remembered streams can be refused before their stated expiry.
+                    track.clearStream();
+                    retriedStream = true;
+                    continue;
+                }
+                retriedDisk = false;
+                retriedStream = false;
+                skipDisk = false;
                 last = outcome;
                 from = 0;
                 switch (outcome) {
@@ -305,11 +331,20 @@ public final class Player implements AutoCloseable {
             }
         }
 
-        /** The track's audio stream, or null when yt-dlp could not find one. */
-        private String resolve(Track track) {
+        /**
+         * The file already saved for this track, or a freshly resolved stream.
+         * Opening a stream also queues a save, so the next play can use the file.
+         */
+        private Located open(Track track, int trackIndex, boolean skipDisk) {
+            if (!skipDisk) {
+                Path local = store.existing(track);
+                if (local != null) return new Located(local.toString(), true);
+            }
             if (track.streamUrl() == null && !paused) state = PlaybackState.LOADING;
             try {
-                return YtDlp.resolve(track);
+                String stream = YtDlp.resolve(track);
+                store.request(track, trackIndex + 1, queue.size());
+                return new Located(stream, false);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
@@ -319,15 +354,18 @@ public final class Player implements AutoCloseable {
             }
         }
 
-        /** Looks up the next track's stream while this one plays, so it starts without a wait. */
+        /** Resolves the next track while this one plays, and saves it when it is not on disk yet. */
         private void prefetchAfter(int i) {
             List<Track> tracks = queue;
             if (i + 1 >= tracks.size()) return;
             Track next = tracks.get(i + 1);
-            if (next.streamUrl() != null) return;
+            int number = i + 2;
+            int total = tracks.size();
             prefetch.submit(() -> {
                 try {
-                    YtDlp.resolve(next);
+                    if (store.existing(next) != null) return;
+                    if (next.streamUrl() == null) YtDlp.resolve(next);
+                    store.request(next, number, total);
                 } catch (Exception ignored) {
                     // Tried again when the track comes up.
                 }

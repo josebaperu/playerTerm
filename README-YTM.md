@@ -110,9 +110,37 @@ Volume, equalizer curve and the last track played are kept in
 `~/.config/playerytm/config.properties` (honouring `XDG_CONFIG_HOME`).
 Playlist listings are kept in `~/.cache/playerytm/playlists` (honouring
 `XDG_CACHE_HOME`) and reused until that playlist's link or date changes.
+YouTube cookies are copied once from Firefox into `cookies.txt` in that same
+`playerytm` cache directory and reused after that, so Firefox can be closed.
+Delete that file to export again.
 
-These are kept apart from playerTerm's, so the two players never share a volume
-or equalizer curve.
+Settings and the listing cache are kept apart from playerTerm's, so the two
+players never share a volume or equalizer curve. Saved audio is not: it goes
+in the music folder playerTerm already plays.
+
+## Saved tracks
+
+The first time a track is streamed, playerYTM saves it into the music folder
+while it plays. The playlist name is the directory and the track name is the
+file, and the title, artist, album, track number and video id are written
+into the file. The next time that track is played, the file is used and
+yt-dlp is not asked again.
+
+The folder is resolved in the same order as playerTerm, first hit wins:
+
+| | |
+|---|---|
+| `$PLAYERTERM_MUSIC` | |
+| `$XDG_MUSIC_DIR` | |
+| `XDG_MUSIC_DIR` in `~/.config/user-dirs.dirs` | what your desktop set |
+| `~/Music` | last resort |
+
+A playlist called `Night Drive` and a track `Blue` by `Ada` is saved as
+`Night Drive/Blue.opus`. The file carries the title, the artist, the playlist
+name as the album, the track number and the video id. Characters a file name
+cannot contain are turned into spaces. A second track that would reuse a name
+already taken by a different video is saved beside it, with the video id added
+to the file name. The audio is opus, which playerTerm plays.
 
 ## How it works
 
@@ -135,18 +163,21 @@ yt-dlp does not scan the playlist again; a new playlist, or one whose link or
 date changed, still takes a second or two, and a spinner stands in for the
 track count until then. Pressing Enter on a playlist that is still listing
 plays it the moment its tracks arrive. The saved listing is the tracks
-themselves. The direct audio address of a track still expires, and is looked
-up again when that track is played.
+themselves. It does not include the audio. A track that already has a file in
+the music folder is played from that file. Otherwise the direct audio address
+is looked up when the track is played, because YouTube expires it.
 
 **Playing a playlist** hands its tracks to one session thread. For each track
-yt-dlp resolves the best audio stream (the header shows LOADING meanwhile),
-and the next track's stream is looked up while the current one plays, so the
-change between tracks is quick. Resolved streams are reused until YouTube's
-expiry; one refused early is resolved again once. ffmpeg reads the stream
-with reconnects enabled, then the session equalises and writes it. Pause stops
-the output line so the sound cuts immediately. Seeking restarts ffmpeg with
-`-ss` ahead of the input, so a jump costs one ranged request rather than
-downloading everything skipped.
+that is not already on disk, yt-dlp resolves the best audio stream (the header
+shows LOADING meanwhile) and a background save writes the file for next time.
+The next track is looked up while the current one plays, so the change
+between tracks is quick. Resolved streams are reused until YouTube's expiry;
+one refused early is resolved again once. A file this player wrote that will
+not decode is deleted and the stream is tried instead. A file that was already
+in the folder is left in place. ffmpeg reads the stream, or the file, with
+reconnects enabled for streams, then the session equalises and writes it. Pause stops the output line so the sound cuts immediately. Seeking
+restarts ffmpeg with `-ss` ahead of the input, so a jump costs one ranged
+request rather than downloading everything skipped.
 
 The interface is drawn straight to the terminal: a double buffered cell grid
 diffed per row, 256 colour output, raw mode and SGR mouse reporting via

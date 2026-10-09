@@ -2,8 +2,9 @@ package org.example.ytm.model;
 
 /**
  * One YouTube Music track. Title, artist and duration come from the playlist
- * listing; the audio stream address is looked up by yt-dlp when the track is
- * about to play, and kept until YouTube says it expires.
+ * listing. Playback uses a copy saved in the music folder when there is one,
+ * and otherwise a stream address looked up by yt-dlp and kept until YouTube
+ * says it expires.
  */
 public final class Track {
 
@@ -11,7 +12,7 @@ public final class Track {
     private final String url;
     private final String title;
     private final String artist;
-    private final String album;
+    private volatile String album;
     private volatile double duration;
     private volatile String streamUrl;
     private volatile long streamExpires;
@@ -50,6 +51,11 @@ public final class Track {
     /** The playlist the track was listed in. */
     public String album() {
         return album;
+    }
+
+    /** The playlist was renamed, so the saved directory follows the new title. */
+    public void setAlbum(String album) {
+        this.album = album == null ? "" : album;
     }
 
     public double duration() {

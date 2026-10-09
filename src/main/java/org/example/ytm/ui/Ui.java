@@ -514,8 +514,11 @@ public final class Ui {
         x = s.put(x, y, String.format("%-6s", vol), p.isMuted() ? Theme.ALERT : Theme.TEXT);
 
         String message = app.statusMessage();
+        String problem = p.storeProblem();
         if (!message.isEmpty()) {
             s.putClipped(x + 2, y, message, w - x - 3, Theme.GOLD);
+        } else if (!problem.isEmpty()) {
+            s.putClipped(x + 2, y, problem, w - x - 3, Theme.ALERT);
         } else {
             s.putClipped(x + 2, y, sourceLabel(app), w - x - 3, Theme.FAINT);
         }

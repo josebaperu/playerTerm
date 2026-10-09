@@ -194,8 +194,12 @@ public final class YtmApp {
                 streams with yt-dlp and ffmpeg, one playlist at a time
 
                 playlists:  $PLAYERTERM_PLAYLISTS, then ~/Downloads/ytm_playlists
+                music:      $PLAYERTERM_MUSIC, then $XDG_MUSIC_DIR, then ~/Music
+                            a streamed track is saved there, under its playlist
+                            name, and played from that file the next time
                 settings:   ~/.config/playerytm/config.properties
-                cache:      ~/.cache/playerytm/playlists""");
+                cache:      ~/.cache/playerytm/playlists
+                cookies:    ~/.cache/playerytm/cookies.txt  (once from Firefox, then reused)""");
     }
 
     private void loop(Terminal terminal, Screen screen) {
