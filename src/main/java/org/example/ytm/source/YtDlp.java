@@ -25,7 +25,9 @@ import java.util.regex.Pattern;
  * download that audio into a file.
  * The first call copies Firefox's YouTube cookies into
  * {@code ~/.cache/playerytm/cookies.txt}. Later calls pass only
- * {@code --cookies} and that file, so Firefox can be closed. Both block,
+ * {@code --cookies} and that file, so Firefox can be closed. Once that
+ * file holds a YouTube cookie, a call that selects audio also asks the
+ * YouTube Music client and takes the highest audio bitrate. Both block,
  * so they belong on a background thread; interrupting the caller kills
  * the child process.
  */
@@ -37,6 +39,16 @@ public final class YtDlp {
     private static final long RESOLVE_TIMEOUT_S = 45;
     private static final long DOWNLOAD_TIMEOUT_S = 900;
     private static final String COOKIE_BROWSER = "firefox";
+    /** Music client plus the normal clients, so the premium stream is in the list. */
+    private static final String MUSIC_CLIENT = "youtube:player_client=default,web_music";
+    /**
+     * Premium music audio is 256 kbps. Prefer that tier when it is offered,
+     * and otherwise keep the usual best audio. A plain bitrate sort would
+     * take a 130 kbps AAC over a 129 kbps opus.
+     */
+    private static final String MUSIC_FORMAT = "bestaudio[abr>=192]/bestaudio/best";
+    /** Opus bitrate when that music stream has to be converted. Premium AAC is 256 kbps. */
+    private static final String MUSIC_AUDIO_QUALITY = "256K";
     private static final Object COOKIE_LOCK = new Object();
     /** True while one call is still copying Firefox cookies into the file. */
     private static boolean exporting;
@@ -57,22 +69,50 @@ public final class YtDlp {
     }
 
     /**
-     * {@code yt-dlp --cookies <file>}, or, until that file exists,
-     * {@code yt-dlp --cookies-from-browser firefox --cookies <file>}.
+     * {@code yt-dlp --cookies <file>}, or, until that file holds a YouTube
+     * cookie, {@code yt-dlp --cookies-from-browser firefox --cookies <file>}.
      * Passing both makes yt-dlp load Firefox and write the jar on exit.
+     * With a YouTube cookie already in the jar, an audio selection also
+     * passes the music client and prefers a stream of at least 192 kbps.
      */
     private static String[] command(boolean fromBrowser, String... args) {
-        String[] cmd = new String[args.length + (fromBrowser ? 5 : 3)];
-        int i = 0;
-        cmd[i++] = binary();
+        boolean music = !fromBrowser && selectsFormat(args);
+        List<String> cmd = new ArrayList<>();
+        cmd.add(binary());
         if (fromBrowser) {
-            cmd[i++] = "--cookies-from-browser";
-            cmd[i++] = COOKIE_BROWSER;
+            cmd.add("--cookies-from-browser");
+            cmd.add(COOKIE_BROWSER);
         }
-        cmd[i++] = "--cookies";
-        cmd[i++] = cookieFile().toString();
-        System.arraycopy(args, 0, cmd, i, args.length);
-        return cmd;
+        cmd.add("--cookies");
+        cmd.add(cookieFile().toString());
+        if (music) {
+            cmd.add("--extractor-args");
+            cmd.add(MUSIC_CLIENT);
+        }
+        for (int i = 0; i < args.length; i++) {
+            if (music && i + 1 < args.length && ("-f".equals(args[i]) || "--format".equals(args[i]))) {
+                cmd.add(args[i]);
+                cmd.add(MUSIC_FORMAT);
+                i++;
+                continue;
+            }
+            if (music && i + 1 < args.length && "--audio-quality".equals(args[i])) {
+                cmd.add(args[i]);
+                cmd.add(MUSIC_AUDIO_QUALITY);
+                i++;
+                continue;
+            }
+            cmd.add(args[i]);
+        }
+        return cmd.toArray(String[]::new);
+    }
+
+    /** True when the arguments select a format. Playlist listings do not. */
+    private static boolean selectsFormat(String... args) {
+        for (String arg : args) {
+            if ("-f".equals(arg) || "--format".equals(arg)) return true;
+        }
+        return false;
     }
 
     /** The tracks of a playlist, album or single video, in their listed order. */
@@ -100,6 +140,7 @@ public final class YtDlp {
     public static String resolve(Track track) throws IOException, InterruptedException {
         String cached = track.streamUrl();
         if (cached != null) return cached;
+        // With a YouTube cookie, command() asks the music client and prefers its high-bitrate stream.
         String out = call(RESOLVE_TIMEOUT_S, "-f", "bestaudio/best", "--no-playlist",
                 "--no-warnings", "--print", "urls", track.url());
         String stream = out.lines().map(String::trim).filter(l -> l.startsWith("http")).findFirst().orElse(null);
@@ -119,6 +160,8 @@ public final class YtDlp {
         Path dir = Files.createTempDirectory("playerytm-");
         try {
             List<String> args = new ArrayList<>();
+            // Without a YouTube cookie this prefers opus. With one, command()
+            // takes the music client's high-bitrate stream and converts it at 256 kbps.
             args.addAll(List.of("-f", "bestaudio[acodec^=opus]/bestaudio/best",
                     "--no-playlist", "--no-warnings", "--no-progress", "--no-simulate",
                     "-x", "--audio-format", "opus", "--audio-quality", "0"));
