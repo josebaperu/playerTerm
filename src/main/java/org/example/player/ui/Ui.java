@@ -1,6 +1,7 @@
 package org.example.player.ui;
 
 import org.example.player.PlayerApp;
+import org.example.player.audio.Effects;
 import org.example.player.audio.Equalizer;
 import org.example.player.audio.FormatInfo;
 import org.example.player.audio.PlaybackState;
@@ -55,7 +56,9 @@ public final class Ui {
         drawLibrary(s, app, 0, l.mainTop(), leftW, mainH);
         drawNowPlaying(s, app, rightX, l.mainTop(), rightW, npH);
         if (spectrumH >= 3) drawSpectrum(s, app, rightX, l.mainTop() + npH, rightW, spectrumH);
-        drawEqualizer(s, app, 0, l.eqTop(), w, l.eqPanelH(), l.eqRows());
+        int fxW = effectsPanelWidth(w);
+        drawEqualizer(s, app, 0, l.eqTop(), w - fxW, l.eqPanelH(), l.eqRows());
+        drawEffects(s, app, w - fxW, l.eqTop(), fxW, l.eqPanelH());
         drawStatus(s, app, h - 2, w);
         drawFooter(s, app, h - 1, w);
         if (app.showHelp()) drawHelp(s, app, w, h);
@@ -116,7 +119,14 @@ public final class Ui {
     // ------------------------------------------------------------ hit testing
 
     /** Regions the pointer can land on. */
-    public enum Zone { NONE, LIBRARY_ROW, NOW_PLAYING, PROGRESS, EQ_BAND, VOLUME }
+    public enum Zone { NONE, LIBRARY_ROW, NOW_PLAYING, PROGRESS, EQ_BAND, EFFECT, VOLUME }
+
+    /** Width of the effects box. The equalizer keeps the columns to its left. */
+    public static int effectsPanelWidth(int width) {
+        int fx = Math.max(26, Math.min(42, width * 38 / 100));
+        if (width - fx < 36) fx = Math.max(20, width - 36);
+        return fx;
+    }
 
     /**
      * @param zone  what was clicked
@@ -127,7 +137,7 @@ public final class Ui {
         public static final Hit NONE = new Hit(Zone.NONE, -1, Integer.MIN_VALUE);
     }
 
-    public static Hit hitTest(int width, int height, int x, int y) {
+    public static Hit hitTest(int width, int height, int x, int y, int effectIndex) {
         if (width < MIN_WIDTH || height < MIN_HEIGHT) return Hit.NONE;
         Layout l = layout(height);
 
@@ -140,7 +150,9 @@ public final class Ui {
             return new Hit(Zone.LIBRARY_ROW, y - l.mainTop() - 1, Integer.MIN_VALUE);
         }
         if (y >= l.eqTop() && y < l.eqTop() + l.eqPanelH()) {
-            int colW = Math.max(3, (width - 8) / Equalizer.BANDS);
+            int eqW = width - effectsPanelWidth(width);
+            if (x >= eqW) return new Hit(Zone.EFFECT, effectAt(l, y, effectIndex), Integer.MIN_VALUE);
+            int colW = Math.max(3, (eqW - 8) / Equalizer.BANDS);
             int band = -1;
             if (x >= EQ_TRACK_X && x < EQ_TRACK_X + colW * Equalizer.BANDS) {
                 band = Math.min(Equalizer.BANDS - 1, (x - EQ_TRACK_X) / colW);
@@ -431,8 +443,9 @@ public final class Ui {
         boolean focused = app.focus() == PlayerApp.Focus.EQUALIZER;
         int border = focused ? Theme.ACCENT : Theme.LINE;
 
-        String title = "EQUALIZER · " + app.presetLabel() + " · " + (eq.isEnabled() ? "on" : "bypass")
-                + " · pre " + signed(eq.preamp()) + " dB";
+        String title = (w >= 56 ? "EQUALIZER · " : "") + app.presetLabel()
+                + " · " + (eq.isEnabled() ? "on" : "bypass")
+                + " · pre " + signed(eq.preamp());
         s.box(x, y, w, h, title, border, focused ? Theme.ACCENT_BOLD : Theme.MUTED);
 
         int gutter = x + 1;
@@ -488,6 +501,52 @@ public final class Ui {
         }
     }
 
+    private static void drawEffects(Screen s, PlayerApp app, int x, int y, int w, int h) {
+        Effects fx = app.player().effects();
+        boolean focused = app.focus() == PlayerApp.Focus.EFFECTS;
+        int border = focused ? Theme.ACCENT : Theme.LINE;
+        s.box(x, y, w, h, "EFFECTS", border, focused ? Theme.ACCENT_BOLD : Theme.MUTED);
+
+        int top = y + 1;
+        int visible = h - 2;
+        int selected = app.effectIndex();
+        int scroll = effectScroll(selected, visible);
+        for (int row = 0; row < visible; row++) {
+            int i = scroll + row;
+            if (i >= Effects.COUNT) break;
+            int ry = top + row;
+            boolean onRow = focused && i == selected;
+            if (onRow) s.fill(x + 1, ry, w - 2, 1, ' ', Theme.SELECTED);
+            String value = fx.rowValue(i);
+            boolean dim = fx.dimmed(i);
+            boolean on = fx.enabled(i);
+            int nameStyle = onRow ? Theme.SELECTED : dim ? Theme.FAINT : on ? Theme.TEXT : Theme.MUTED;
+            int valueStyle = onRow ? Theme.SELECTED : dim ? Theme.FAINT : on ? Theme.ACCENT : Theme.FAINT;
+            int valueX = x + w - 2 - value.length();
+            int nameMax = Math.max(1, valueX - (x + 2) - 1);
+            s.putClipped(x + 2, ry, Effects.NAMES[i], nameMax, nameStyle);
+            if (valueX > x + 1) s.put(valueX, ry, value, valueStyle);
+        }
+    }
+
+    /** First effect row kept on screen, so the selected row stays inside the box. */
+    private static int effectScroll(int selected, int visible) {
+        if (visible <= 0) return 0;
+        int max = Math.max(0, Effects.COUNT - visible);
+        if (selected < 0) return 0;
+        return Math.max(0, Math.min(max, selected - visible + 1));
+    }
+
+    /** Effect under a row of the effects box, or -1 on the border. */
+    private static int effectAt(Layout l, int y, int selected) {
+        int top = l.eqTop() + 1;
+        int visible = l.eqPanelH() - 2;
+        if (y < top || y >= top + visible) return -1;
+        int index = effectScroll(selected, visible) + (y - top);
+        if (index < 0 || index >= Effects.COUNT) return -1;
+        return index;
+    }
+
     private static void drawStatus(Screen s, PlayerApp app, int y, int w) {
         Player p = app.player();
         int x = 1;
@@ -511,9 +570,11 @@ public final class Ui {
     }
 
     private static void drawFooter(Screen s, PlayerApp app, int y, int w) {
-        String keys = app.focus() == PlayerApp.Focus.LIBRARY
-                ? "↑↓ move  space fold/pause  ⏎ play  n/b track  ,. seek  tab eq  +- vol  m mute  ? help  q quit"
-                : "←→ band  ↑↓ gain  [ ] preset  e bypass  r reset  < > preamp  tab library  +- vol  ? help  q quit";
+        String keys = switch (app.focus()) {
+            case LIBRARY -> "↑↓ move  space fold/pause  ⏎ play  n/b track  ,. seek  tab panels  +- vol  m mute  ? help  q quit";
+            case EFFECTS -> "↑↓ effect  space toggle  ←→ bass/width/room  tab library  +- vol  ? help  q quit";
+            case EQUALIZER -> "←→ band  ↑↓ gain  1-5 band  [ ] preset  e bypass  r reset  < > preamp  tab fx  +- vol  ? help  q quit";
+        };
         s.putClipped(1, y, keys, w - 2, Theme.FAINT);
     }
 
@@ -526,11 +587,16 @@ public final class Ui {
                 "  n / b             next / previous track  s          stop",
                 "  , / .             seek 5s back / on      g / G      top / bottom",
                 "",
-                "EQUALIZER  (tab switches panels and reloads files)",
+                "EQUALIZER  (tab cycles library, equalizer, effects)",
                 "  ← / →             select band            ↑ / ↓      band gain ±1 dB",
-                "  [ / ]             preset                 0-9        pick band",
+                "  [ / ]             preset                 1-5        pick band",
                 "  e                 bypass                 r          reset to flat",
                 "  < / >             preamp ±1 dB",
+                "",
+                "EFFECTS",
+                "  ↑ / ↓             select effect          space      toggle it",
+                "  ← / →             bass, width, reverb room",
+                "  surround and crossfeed are for headphones; surround includes crossfeed",
                 "",
                 "MOUSE",
                 "  click a folder    expands or collapses it",

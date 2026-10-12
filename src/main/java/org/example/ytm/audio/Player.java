@@ -1,5 +1,6 @@
 package org.example.ytm.audio;
 
+import org.example.player.audio.Effects;
 import org.example.player.audio.Equalizer;
 import org.example.player.audio.FormatInfo;
 import org.example.player.audio.SpectrumAnalyzer;
@@ -33,6 +34,7 @@ public final class Player implements AutoCloseable {
     private static final int LINE_BUFFER_BYTES = SAMPLE_RATE * 4 / 8;   // ~125 ms
 
     private final Equalizer equalizer = new Equalizer(SAMPLE_RATE);
+    private final Effects effects = new Effects(SAMPLE_RATE);
     private final SpectrumAnalyzer spectrum = new SpectrumAnalyzer(SAMPLE_RATE);
     private final FormatInfo info = new FormatInfo();
     private final Object pauseLock = new Object();
@@ -56,6 +58,10 @@ public final class Player implements AutoCloseable {
 
     public Equalizer equalizer() {
         return equalizer;
+    }
+
+    public Effects effects() {
+        return effects;
     }
 
     public SpectrumAnalyzer spectrum() {
@@ -149,6 +155,7 @@ public final class Player implements AutoCloseable {
         lastError = "";
         state = PlaybackState.PLAYING;
         equalizer.flush();
+        effects.flush();
         session = new Session(index, 0);
         session.start();
     }
@@ -376,6 +383,8 @@ public final class Player implements AutoCloseable {
             byte[] raw = new byte[BLOCK_BYTES];
             float[] samples = new float[FRAMES_PER_BLOCK * 2];
             long framesWritten = 0;
+            equalizer.flush();
+            effects.flush();
 
             try (TrackDecoder d = new TrackDecoder(stream, from, SAMPLE_RATE, info)) {
                 decoder = d;
@@ -409,7 +418,8 @@ public final class Player implements AutoCloseable {
                         if (filled <= 0) break;
                         int frames = filled / 4;
                         toFloat(raw, filled, samples);
-                        equalizer.process(samples, frames * 2, gain());
+                        equalizer.process(samples, frames * 2);
+                        effects.process(samples, frames * 2, gain());
                         spectrum.feed(samples, frames * 2);
                         toBytes(samples, frames * 2, raw);
                         out.write(raw, 0, frames * 4);

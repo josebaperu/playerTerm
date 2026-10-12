@@ -1,19 +1,26 @@
 package org.example.player.audio;
 
 /**
- * Ten band peaking equalizer with preamp and a soft limiter, applied to
- * interleaved stereo float samples. Gain changes take effect on the next
- * processed block, so sliders respond without interrupting playback.
+ * Five band equalizer with a manual preamp, applied to interleaved stereo
+ * float samples. The ends are shelves and the middle bands are peaks, about
+ * two octaves apart, so five controls still cover the range. Gain changes
+ * take effect on the next processed block.
+ *
+ * <p>The safety limiter lives at the end of {@link Effects}, after every
+ * stage that can add level.
  */
 public final class Equalizer {
 
-    public static final double[] FREQUENCIES = {31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, 16000};
-    public static final String[] LABELS = {"31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
-    public static final int BANDS = 10;
+    public static final double[] FREQUENCIES = {60, 230, 910, 3600, 14000};
+    public static final String[] LABELS = {"60", "230", "910", "3.6k", "14k"};
+    private static final double[] Q = {0.707, 0.9, 0.9, 0.9, 0.707};
+    private enum Kind { LOW_SHELF, PEAK, HIGH_SHELF }
+    private static final Kind[] KINDS = {
+            Kind.LOW_SHELF, Kind.PEAK, Kind.PEAK, Kind.PEAK, Kind.HIGH_SHELF
+    };
+
+    public static final int BANDS = 5;
     public static final int MAX_GAIN_DB = 12;
-    /** Roughly one octave of bandwidth per band. */
-    private static final double Q = 1.41;
-    private static final double LIMIT_KNEE = 0.86;
 
     private final double sampleRate;
     private final Biquad[] left = new Biquad[BANDS];
@@ -55,6 +62,26 @@ public final class Equalizer {
         dirty = true;
     }
 
+    /**
+     * A saved curve from the five band equalizer. A blank value, or a curve
+     * saved by the old ten band equalizer, comes back flat.
+     */
+    public static int[] gainsFromSaved(String raw) {
+        int[] flat = new int[BANDS];
+        if (raw == null || raw.isBlank()) return flat;
+        String[] parts = raw.split(",");
+        if (parts.length != BANDS) return flat;
+        int[] out = new int[BANDS];
+        for (int i = 0; i < BANDS; i++) {
+            try {
+                out[i] = Integer.parseInt(parts[i].trim());
+            } catch (NumberFormatException e) {
+                return flat;
+            }
+        }
+        return out;
+    }
+
     public void apply(EqPreset preset) {
         setGains(preset.gains());
     }
@@ -91,45 +118,39 @@ public final class Equalizer {
     private synchronized void refresh() {
         if (!dirty) return;
         for (int i = 0; i < BANDS; i++) {
-            left[i].setPeaking(sampleRate, FREQUENCIES[i], Q, gains[i]);
-            right[i].setPeaking(sampleRate, FREQUENCIES[i], Q, gains[i]);
+            tune(left[i], i);
+            tune(right[i], i);
         }
         dirty = false;
     }
 
-    /**
-     * Processes interleaved stereo samples in place.
-     *
-     * @param extraGain linear gain applied after the filter bank (volume)
-     */
-    public void process(float[] buffer, int count, float extraGain) {
-        boolean on = enabled;
-        if (on) refresh();
-        double pre = on ? Math.pow(10.0, preampDb / 20.0) : 1.0;
-        double g = pre * extraGain;
-
-        synchronized (this) {
-            for (int i = 0; i + 1 < count; i += 2) {
-                double l = buffer[i] * g;
-                double r = buffer[i + 1] * g;
-                if (on) {
-                    for (int b = 0; b < BANDS; b++) {
-                        l = left[b].process(l);
-                        r = right[b].process(r);
-                    }
-                }
-                buffer[i] = (float) limit(l);
-                buffer[i + 1] = (float) limit(r);
-            }
+    private void tune(Biquad filter, int band) {
+        double freq = FREQUENCIES[band];
+        double q = Q[band];
+        int gain = gains[band];
+        switch (KINDS[band]) {
+            case LOW_SHELF -> filter.setLowShelf(sampleRate, freq, q, gain);
+            case HIGH_SHELF -> filter.setHighShelf(sampleRate, freq, q, gain);
+            case PEAK -> filter.setPeaking(sampleRate, freq, q, gain);
         }
     }
 
-    /** Soft knee limiter: transparent below the knee, saturating above it. */
-    private static double limit(double x) {
-        double a = Math.abs(x);
-        if (a <= LIMIT_KNEE) return x;
-        double over = (a - LIMIT_KNEE) / (1.0 - LIMIT_KNEE);
-        double shaped = LIMIT_KNEE + (1.0 - LIMIT_KNEE) * Math.tanh(over);
-        return Math.copySign(shaped, x);
+    /** Processes interleaved stereo samples in place. Bypassed audio is left untouched. */
+    public void process(float[] buffer, int count) {
+        if (!enabled) return;
+        refresh();
+        double pre = Math.pow(10.0, preampDb / 20.0);
+        synchronized (this) {
+            for (int i = 0; i + 1 < count; i += 2) {
+                double l = buffer[i] * pre;
+                double r = buffer[i + 1] * pre;
+                for (int b = 0; b < BANDS; b++) {
+                    l = left[b].process(l);
+                    r = right[b].process(r);
+                }
+                buffer[i] = (float) l;
+                buffer[i + 1] = (float) r;
+            }
+        }
     }
 }

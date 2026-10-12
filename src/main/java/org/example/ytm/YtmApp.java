@@ -1,5 +1,6 @@
 package org.example.ytm;
 
+import org.example.player.audio.Effects;
 import org.example.player.audio.EqPreset;
 import org.example.player.audio.Equalizer;
 import org.example.ytm.audio.PlaybackState;
@@ -27,7 +28,7 @@ import java.util.List;
 /** Application state, key and mouse handling, and the render loop. */
 public final class YtmApp {
 
-    public enum Focus { LIBRARY, EQUALIZER }
+    public enum Focus { LIBRARY, EQUALIZER, EFFECTS }
 
     private static final long FRAME_MS = 40;
     private static final long MESSAGE_MS = 4000;
@@ -49,6 +50,7 @@ public final class YtmApp {
     private int scroll;
     private Focus focus = Focus.LIBRARY;
     private int eqBand;
+    private int effectIndex;
     private boolean showHelp;
     private boolean running = true;
     private long tick;
@@ -78,9 +80,10 @@ public final class YtmApp {
     private void loadSettings() {
         player.setVolume(settings.getInt("volume", 70));
         Equalizer eq = player.equalizer();
-        eq.setGains(settings.getInts("eq.gains", new int[Equalizer.BANDS]));
+        eq.setGains(Equalizer.gainsFromSaved(settings.getString("eq.gains", "")));
         eq.setPreamp(settings.getInt("eq.preamp", 0));
         eq.setEnabled(settings.getBool("eq.enabled", true));
+        player.effects().read(settings);
     }
 
     private void saveSettings() {
@@ -88,6 +91,7 @@ public final class YtmApp {
         settings.setInts("eq.gains", player.equalizer().gains());
         settings.set("eq.preamp", player.equalizer().preamp());
         settings.set("eq.enabled", player.equalizer().isEnabled());
+        player.effects().write(settings);
         Track track = player.current();
         if (track != null) settings.set("last.track", track.url());
         settings.save();
@@ -182,7 +186,7 @@ public final class YtmApp {
 
     private static void printUsage() {
         System.out.println("""
-                playerYTM - YouTube Music in the terminal, with a 10 band equalizer
+                playerYTM - YouTube Music in the terminal, with a 5 band equalizer
 
                 usage: playerYTM [options] [playlists folder]
                   -p, --playlists <dir> folder of playlist exports to read
@@ -240,8 +244,21 @@ public final class YtmApp {
             if (!showHelp) return;
         }
 
-        if (key.type() == Key.Type.TAB || key.type() == Key.Type.SHIFT_TAB) {
-            focus = focus == Focus.LIBRARY ? Focus.EQUALIZER : Focus.LIBRARY;
+        if (key.type() == Key.Type.TAB) {
+            focus = switch (focus) {
+                case LIBRARY -> Focus.EQUALIZER;
+                case EQUALIZER -> Focus.EFFECTS;
+                case EFFECTS -> Focus.LIBRARY;
+            };
+            reloadLibrary();
+            return;
+        }
+        if (key.type() == Key.Type.SHIFT_TAB) {
+            focus = switch (focus) {
+                case LIBRARY -> Focus.EFFECTS;
+                case EFFECTS -> Focus.EQUALIZER;
+                case EQUALIZER -> Focus.LIBRARY;
+            };
             reloadLibrary();
             return;
         }
@@ -323,10 +340,10 @@ public final class YtmApp {
             return;
         }
 
-        if (focus == Focus.EQUALIZER) {
-            handleEqualizerKey(key);
-        } else {
-            handleLibraryKey(key);
+        switch (focus) {
+            case EQUALIZER -> handleEqualizerKey(key);
+            case EFFECTS -> handleEffectsKey(key);
+            case LIBRARY -> handleLibraryKey(key);
         }
     }
 
@@ -345,10 +362,46 @@ public final class YtmApp {
                 else if (c == 'l') eqBand = (eqBand + 1) % Equalizer.BANDS;
                 else if (c == 'k') eq.setGain(eqBand, eq.gain(eqBand) + 1);
                 else if (c == 'j') eq.setGain(eqBand, eq.gain(eqBand) - 1);
-                else if (c >= '0' && c <= '9') eqBand = c == '0' ? 9 : c - '1';
+                else if (c >= '1' && c <= '5') eqBand = c - '1';
             }
             default -> { }
         }
+    }
+
+    private void handleEffectsKey(Key key) {
+        Effects fx = player.effects();
+        int n = Effects.COUNT;
+        switch (key.type()) {
+            case UP -> effectIndex = (effectIndex + n - 1) % n;
+            case DOWN -> effectIndex = (effectIndex + 1) % n;
+            case LEFT -> adjustEffect(fx, -1);
+            case RIGHT -> adjustEffect(fx, 1);
+            case HOME -> effectIndex = 0;
+            case END -> effectIndex = n - 1;
+            case ENTER -> {
+                fx.toggle(effectIndex);
+                note(fx.describe(effectIndex));
+            }
+            case CHAR -> {
+                switch (key.ch()) {
+                    case 'k' -> effectIndex = (effectIndex + n - 1) % n;
+                    case 'j' -> effectIndex = (effectIndex + 1) % n;
+                    case 'h' -> adjustEffect(fx, -1);
+                    case 'l' -> adjustEffect(fx, 1);
+                    case ' ' -> {
+                        fx.toggle(effectIndex);
+                        note(fx.describe(effectIndex));
+                    }
+                    default -> { }
+                }
+            }
+            default -> { }
+        }
+    }
+
+    /** ←→ changes bass, width or the reverb room. Other rows have nothing to move. */
+    private void adjustEffect(Effects fx, int direction) {
+        if (fx.adjust(effectIndex, direction)) note(fx.describe(effectIndex));
     }
 
     private void handleLibraryKey(Key key) {
@@ -511,7 +564,7 @@ public final class YtmApp {
             return;
         }
 
-        Ui.Hit hit = Ui.hitTest(lastWidth, lastHeight, event.x(), event.y());
+        Ui.Hit hit = Ui.hitTest(lastWidth, lastHeight, event.x(), event.y(), effectIndex);
         if (event.isWheel()) {
             handleWheel(event, hit);
             return;
@@ -539,6 +592,15 @@ public final class YtmApp {
                         player.equalizer().setGain(eqBand, hit.value());
                         draggingBand = eqBand;
                     }
+                }
+            }
+            case EFFECT -> {
+                if (!press) return;
+                focus = Focus.EFFECTS;
+                if (hit.index() >= 0) {
+                    effectIndex = hit.index();
+                    player.effects().toggle(effectIndex);
+                    note(player.effects().describe(effectIndex));
                 }
             }
             case VOLUME -> {
@@ -583,6 +645,13 @@ public final class YtmApp {
                 if (hit.index() >= 0) eqBand = hit.index();
                 Equalizer eq = player.equalizer();
                 eq.setGain(eqBand, eq.gain(eqBand) + direction);
+            }
+            case EFFECT -> {
+                focus = Focus.EFFECTS;
+                if (hit.index() >= 0) effectIndex = hit.index();
+                Effects fx = player.effects();
+                fx.nudge(effectIndex, direction);
+                note(fx.describe(effectIndex));
             }
             case VOLUME, NOW_PLAYING -> {
                 player.adjustVolume(direction * 5);
@@ -706,6 +775,10 @@ public final class YtmApp {
 
     public int eqBand() {
         return eqBand;
+    }
+
+    public int effectIndex() {
+        return effectIndex;
     }
 
     public boolean showHelp() {

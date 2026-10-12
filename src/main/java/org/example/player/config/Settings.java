@@ -32,6 +32,14 @@ public final class Settings {
         }
     }
 
+    public double getDouble(String key, double fallback) {
+        try {
+            return Double.parseDouble(props.getProperty(key, String.valueOf(fallback)).trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     public boolean getBool(String key, boolean fallback) {
         return Boolean.parseBoolean(props.getProperty(key, String.valueOf(fallback)).trim());
     }
