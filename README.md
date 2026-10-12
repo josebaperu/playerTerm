@@ -1,6 +1,7 @@
 # playerTerm
 
-A music player for the terminal, with a real ten band equalizer.
+A music player for the terminal, with a five band equalizer and a set of
+audio effects.
 
 ![playerTerm playing an album, with the Pop preset applied](docs/screenshot.png)
 
@@ -54,14 +55,23 @@ Resolved in this order, first hit wins:
 | play/pause | media key, pauses or resumes |
 | `PgUp` `PgDn` `g` `G` | page, top, bottom |
 
-| Equalizer (`tab` switches panels) | |
+| Equalizer (`tab` cycles library, equalizer, effects) | |
 |---|---|
-| `←` `→` or `0`-`9` | select a band — the active slider turns white |
+| `←` `→` or `1`-`5` | select a band — the active slider turns white |
 | `↑` `↓` | band gain, ±1 dB up to ±12 |
 | `[` `]` | cycle presets |
 | `e` | bypass the filter bank |
 | `r` | back to flat |
 | `<` `>` | preamp |
+
+| Effects | |
+|---|---|
+| `↑` `↓` | select bass, width, surround, crossfeed, reverb or the leveler |
+| `space` | toggle the selected effect |
+| `←` `→` | bass strength, stereo width, or the reverb room (Room, Club, Hall) |
+
+Surround and crossfeed are headphone effects. Surround already includes a
+crossfeed, so that row rests while surround is on.
 
 | Anywhere | |
 |---|---|
@@ -76,7 +86,8 @@ Resolved in this order, first hit wins:
 | click a track | selects it; click again to play |
 | click Now Playing | pauses or resumes |
 | click the progress bar | seeks there; the wheel nudges 5 seconds |
-| wheel | scrolls the library, or adjusts the band or volume under the pointer |
+| click an effect | toggles it |
+| wheel | scrolls the library, or adjusts the band, effect or volume under the pointer |
 | drag an equalizer slider | the gain follows the pointer, even outside its column |
 
 Mouse tracking means the terminal stops handling plain drag-to-select; hold
@@ -92,22 +103,25 @@ playerTerm --no-mouse            leave the mouse to the terminal
 playerTerm -h, --help            show help
 ```
 
-Volume, equalizer curve and the last track played are kept in
-`~/.config/playerterm/config.properties` (honouring `XDG_CONFIG_HOME`).
+Volume, the equalizer curve, the effect settings and the last track played
+are kept in `~/.config/playerterm/config.properties` (honouring
+`XDG_CONFIG_HOME`). A curve saved by the old ten band equalizer is left
+behind and the five band equalizer starts flat.
 
 ## How it works
 
 ```
-ffmpeg ──PCM s16le──▶ float ──▶ 10x biquad peaking filters (per channel)
-                                   │
-                                   ├──▶ preamp, volume, soft limiter ──▶ sound card
-                                   └──▶ 2048 point FFT ──▶ spectrum bars
+ffmpeg ──PCM s16le──▶ float ──▶ 5-band EQ ──▶ effects ──▶ volume, limiter ──▶ sound card
+                                              │                    │
+                                              │                    └──▶ spectrum bars
+                                              └── bass, width, surround or crossfeed, reverb, leveler
 ```
 
-Each equalizer band is an RBJ peaking biquad at roughly one octave of
-bandwidth, recalculated when a slider moves, so changes are audible
-immediately without interrupting playback. A soft knee limiter after the gain
-stage keeps heavy boosts from clipping.
+The equalizer is a low shelf at 60 Hz, peaks at 230 Hz, 910 Hz and 3.6 kHz,
+and a high shelf at 14 kHz. Each band is an RBJ biquad, recalculated when a
+slider moves, so changes are audible immediately without interrupting
+playback. The effects are the same chain as aaradio, without mono and without
+Android's spatializer. A peak limiter after the volume keeps boosts from clipping.
 
 **Scanning never opens a file.** Starting up only reads directory entries, so
 a large library appears instantly. Tags and durations are filled in afterwards
@@ -133,7 +147,7 @@ diffed per row, 256 colour output, raw mode and SGR mouse reporting via
 │ folder tree       │ now playing + progress      │  top half
 │                   │ spectrum                    │
 ├───────────────────┴─────────────────────────────┤
-│ equalizer                                       │  bottom half
+│ equalizer                  │ effects          │  bottom half
 ├─────────────────────────────────────────────────┤
 │ volume · music folder · messages                │
 └ keys ───────────────────────────────────────────┘
