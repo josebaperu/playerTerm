@@ -14,6 +14,7 @@ import org.example.player.tui.Key;
 import org.example.player.tui.MouseEvent;
 import org.example.player.tui.Screen;
 import org.example.player.tui.Terminal;
+import org.example.ytm.scan.ScanApp;
 import org.example.ytm.ui.Ui;
 import org.example.ytm.source.PlaylistLoader;
 import org.example.ytm.source.PlaylistWatcher;
@@ -97,29 +98,42 @@ public final class YtmApp {
         settings.save();
     }
 
-    private int start(String[] args) {
-        String playlistsPath = null;
-        boolean mouse = settings.getBool("mouse", true);
-        for (int i = 0; i < args.length; i++) {
-            switch (args[i]) {
-                case "-h", "--help" -> {
-                    printUsage();
-                    return 0;
-                }
-                case "-p", "--playlists" -> {
-                    if (i + 1 < args.length) playlistsPath = args[++i];
-                }
-                case "--no-mouse" -> mouse = false;
-                default -> {
-                    if (args[i].startsWith("-")) {
-                        System.err.println("unknown option: " + args[i]);
+    /** What {@code main} was asked to do. {@code exit} is set when parsing itself finishes the run. */
+    record Launch(String playlistsPath, boolean scan, boolean mouseOff, int exit) {
+        static Launch parse(String[] args) {
+            String playlistsPath = null;
+            boolean scan = false;
+            boolean mouseOff = false;
+            for (int i = 0; i < args.length; i++) {
+                switch (args[i]) {
+                    case "-h", "--help" -> {
                         printUsage();
-                        return 2;
+                        return new Launch(null, false, false, 0);
                     }
-                    playlistsPath = args[i];
+                    case "-p", "--playlists" -> {
+                        if (i + 1 < args.length) playlistsPath = args[++i];
+                    }
+                    case "--no-mouse" -> mouseOff = true;
+                    case "--scan" -> scan = true;
+                    default -> {
+                        if (args[i].startsWith("-")) {
+                            System.err.println("unknown option: " + args[i]);
+                            printUsage();
+                            return new Launch(null, false, false, 2);
+                        }
+                        playlistsPath = args[i];
+                    }
                 }
             }
+            return new Launch(playlistsPath, scan, mouseOff, -1);
         }
+    }
+
+    private int start(String[] args) {
+        Launch launch = Launch.parse(args);
+        if (launch.exit() >= 0) return launch.exit();
+        boolean mouse = settings.getBool("mouse", true) && !launch.mouseOff();
+        String playlistsPath = launch.playlistsPath();
 
         if (!hasBinary("ffmpeg", "PLAYERTERM_FFMPEG", "-version")) {
             System.err.println("ffmpeg was not found on PATH. Install it, or set PLAYERTERM_FFMPEG.");
@@ -139,6 +153,7 @@ public final class YtmApp {
             System.err.println("playerYTM needs an interactive terminal (stdin is not a tty).");
             return 1;
         }
+        if (launch.scan()) return ScanApp.run(root);
 
         loadSettings();
         library = new PlaylistLibrary(root);
@@ -191,11 +206,15 @@ public final class YtmApp {
                 usage: playerYTM [options] [playlists folder]
                   -p, --playlists <dir> folder of playlist exports to read
                       --no-mouse        disable mouse reporting for this run
+                      --scan            download albums and tracks missing from the music folder
                   -h, --help            show this help
 
                 reads the newest export in the folder, a JSON list of
                 {id, title, url, updatedDate}, and follows it as new ones arrive.
-                streams with yt-dlp and ffmpeg, one playlist at a time
+                streams with yt-dlp and ffmpeg, one playlist at a time.
+                --scan opens a library scan instead of the player: each playlist
+                is checked against its folder, a missing folder is created, and
+                tracks that are not already saved are downloaded
 
                 playlists:  $PLAYERTERM_PLAYLISTS, then ~/Downloads/ytm_playlists
                 music:      $PLAYERTERM_MUSIC, then $XDG_MUSIC_DIR, then ~/Music

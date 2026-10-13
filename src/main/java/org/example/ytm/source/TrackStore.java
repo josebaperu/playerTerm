@@ -106,6 +106,20 @@ public final class TrackStore implements AutoCloseable {
         return root.resolve(directoryName(track)).resolve(stem(track) + EXTENSION);
     }
 
+    /** The album directory a playlist title is saved under. */
+    public static String albumDirectory(String album) {
+        return directoryName(new Track("", "", "", "", album, 0));
+    }
+
+    /** True when {@code file} is a name this track is saved as, plain or with its video id. */
+    public static boolean isSaveName(Track track, Path file) {
+        if (track == null || file == null || file.getFileName() == null) return false;
+        String name = file.getFileName().toString();
+        String stem = stem(track);
+        return name.equals(stem + EXTENSION)
+                || name.equals(stem + " [" + safeId(track.id()) + "]" + EXTENSION);
+    }
+
     /**
      * Downloads the track in the background when no finished copy exists.
      * {@code number} and {@code total} are the playlist position, written as
@@ -119,6 +133,25 @@ public final class TrackStore implements AutoCloseable {
         try {
             workers.submit(() -> save(track, number, total, key));
         } catch (RejectedExecutionException e) {
+            pending.remove(key);
+        }
+    }
+
+    /**
+     * Saves the track on this thread when the album folder has no finished copy.
+     * Returns that file, or null when the download failed; {@link #problem()}
+     * says why. Throws when the caller is interrupted, which is how a scan stops.
+     */
+    public Path ensure(Track track, int number, int total) throws InterruptedException {
+        if (track == null || track.id().isBlank() || track.url().isBlank()) return null;
+        Path have = existing(track);
+        if (have != null) return have;
+        String key = key(track);
+        if (pending.putIfAbsent(key, Boolean.TRUE) != null) return existing(track);
+        try {
+            write(track, number, total, key);
+            return existing(track);
+        } finally {
             pending.remove(key);
         }
     }
@@ -155,6 +188,17 @@ public final class TrackStore implements AutoCloseable {
     }
 
     private void save(Track track, int number, int total, String key) {
+        try {
+            write(track, number, total, key);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            pending.remove(key);
+        }
+    }
+
+    /** Downloads and publishes one track. A failure is left in {@link #problem()}. */
+    private void write(Track track, int number, int total, String key) throws InterruptedException {
         Path audio = null;
         try {
             if (existing(track) != null) return;
@@ -167,9 +211,9 @@ public final class TrackStore implements AutoCloseable {
                 problem = "";
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            throw e;
         } catch (Exception e) {
-            // The stream still plays. The next play tries the save again.
+            // The stream still plays. The next play, or the next scan, tries again.
             problem = "Couldn't save " + track.displayName() + ": " + brief(e);
         } finally {
             if (audio != null) {
@@ -179,7 +223,6 @@ public final class TrackStore implements AutoCloseable {
                     // The temp file is outside the music folder.
                 }
             }
-            pending.remove(key);
         }
     }
 

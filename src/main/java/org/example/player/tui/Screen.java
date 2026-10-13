@@ -58,6 +58,12 @@ public final class Screen {
         return cx;
     }
 
+    /** The text of one row, including trailing spaces. Used by tests. */
+    public String row(int y) {
+        if (y < 0 || y >= height || width == 0) return "";
+        return new String(chars, y * width, width);
+    }
+
     /** Writes text truncated to {@code max} columns, adding an ellipsis when cut. */
     public void putClipped(int x, int y, String text, int max, int style) {
         if (max <= 0) return;

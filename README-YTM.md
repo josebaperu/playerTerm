@@ -22,6 +22,7 @@ the library and playback differ. It is built as `target/playerYTM.jar`, next to 
 ```bash
 ./playerYTM                     # ~/Downloads/ytm_playlists
 ./playerYTM ~/somewhere/else    # or any folder of exports you name
+./playerYTM --scan              # fill in albums missing from the music folder
 ```
 
 ## Your playlists
@@ -113,6 +114,7 @@ alone entirely.
 ```
 playerYTM [folder]              read exports from that folder
 playerYTM -p, --playlists <dir> same thing, named
+playerYTM --scan                check the music folder and download what is missing
 playerYTM --no-mouse            leave the mouse to the terminal
 playerYTM -h, --help            show help
 ```
@@ -154,6 +156,26 @@ name as the album, the track number and the video id. Characters a file name
 cannot contain are turned into spaces. A second track that would reuse a name
 already taken by a different video is saved beside it, with the video id added
 to the file name. The audio is opus, which playerTerm plays.
+
+## Scan
+
+```bash
+./playerYTM --scan
+./playerYTM --scan ~/somewhere/else
+```
+
+`--scan` opens a library scan instead of the player. With no arguments the
+player runs as usual. The scan reads the same playlist export, then walks the
+music folder. Each playlist is an album directory. A directory that is already
+there is compared with the remote listing: tracks on disk are left as they
+are, and tracks that are missing are downloaded. A playlist with no directory
+gets one, and its tracks are downloaded into it. A file in the folder that
+belongs to none of the tracks is left in place and mentioned in the log.
+
+The screen shows a progress bar for the whole export and a log of each album.
+`q` stops the scan; `q` again closes it. `↑` and `↓` scroll the log. A listing
+saved for the same link and date is reused, so YouTube is asked only for a
+playlist that is new or whose export changed.
 
 ## How it works
 
