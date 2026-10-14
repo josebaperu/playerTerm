@@ -7,6 +7,7 @@ import org.example.player.audio.PlaybackState;
 import org.example.player.audio.Player;
 import org.example.player.audio.TagReader;
 import org.example.player.config.Settings;
+import org.example.player.model.AlbumPlaylist;
 import org.example.player.model.MusicFolder;
 import org.example.player.model.MusicLibrary;
 import org.example.player.model.Row;
@@ -21,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Application state, key and mouse handling, and the render loop. */
 public final class PlayerApp {
@@ -54,6 +56,10 @@ public final class PlayerApp {
     private long lastClickAt;
     private int lastWidth = 80;
     private int lastHeight = 24;
+    /** Folders whose album.m3u write has finished and can be listed. */
+    private final ConcurrentLinkedQueue<MusicFolder> ordersReady = new ConcurrentLinkedQueue<>();
+    /** Folder to start once its playlist file has been read. */
+    private MusicFolder pendingPlay;
 
     public static int run(String[] args) {
         return new PlayerApp().start(args);
@@ -186,6 +192,7 @@ public final class PlayerApp {
         while (running) {
             Key key = terminal.readKey(12);
             if (!key.isNone()) handleKey(key);
+            if (drainOrders()) rebuildRows();
 
             if (terminal.refreshSize(false)) {
                 screen.resize(terminal.width(), terminal.height());
@@ -418,8 +425,63 @@ public final class PlayerApp {
 
     private void toggleFolder(MusicFolder folder) {
         folder.toggleExpanded();
-        if (folder.isExpanded()) tags.requestFolder(folder);
+        if (folder.isExpanded()) prepareTracks(folder, false);
         rebuildRows();
+    }
+
+    /**
+     * Lists a folder from {@code album.m3u}. When the file is missing the track
+     * rows stay hidden, the file is written in track-number order, and the list
+     * appears only after that file has been read back.
+     */
+    private void prepareTracks(MusicFolder folder, boolean playWhenReady) {
+        if (folder.tracks().isEmpty()) {
+            folder.setOrderReady(true);
+            if (playWhenReady) {
+                pendingPlay = null;
+                beginPlayback(folder);
+            }
+            return;
+        }
+        if (AlbumPlaylist.exists(folder)) {
+            AlbumPlaylist.apply(folder);
+            folder.setOrderReady(true);
+            tags.requestFolder(folder);
+            if (playWhenReady) {
+                pendingPlay = null;
+                beginPlayback(folder);
+            }
+            return;
+        }
+        folder.setOrderReady(false);
+        if (playWhenReady) pendingPlay = folder;
+        if (folder.beginOrdering()) {
+            note("ordering " + folder.name());
+            tags.writeAlbumOrder(folder, () -> ordersReady.add(folder));
+        }
+    }
+
+    /** Applies playlists that finished writing, then starts a play that was waiting on one. */
+    private boolean drainOrders() {
+        boolean any = false;
+        MusicFolder folder;
+        while ((folder = ordersReady.poll()) != null) {
+            if (AlbumPlaylist.exists(folder)) {
+                AlbumPlaylist.apply(folder);
+            } else {
+                note("could not write album.m3u in " + folder.name());
+            }
+            folder.setOrderReady(true);
+            folder.endOrdering();
+            any = true;
+        }
+        if (pendingPlay != null && pendingPlay.isOrderReady()) {
+            MusicFolder play = pendingPlay;
+            pendingPlay = null;
+            beginPlayback(play);
+            any = true;
+        }
+        return any;
     }
 
     private void expandSelected() {
@@ -456,6 +518,7 @@ public final class PlayerApp {
         if (row.isFolder()) {
             playFolder(row.folder());
         } else {
+            pendingPlay = null;
             MusicFolder folder = row.folder();
             tags.requestFolder(folder);
             int index = folder.tracks().indexOf(row.track());
@@ -466,13 +529,27 @@ public final class PlayerApp {
 
     /** Plays a folder: its own tracks, or everything beneath it when it has none. */
     private void playFolder(MusicFolder folder) {
-        List<Track> queue = folder.tracks().isEmpty() ? folder.tracksDeep() : folder.tracks();
-        if (queue.isEmpty()) return;
-        tags.requestFolder(folder);
-        if (!folder.isExpanded()) {
-            folder.setExpanded(true);
+        if (folder.tracks().isEmpty()) {
+            AlbumPlaylist.applyDeep(folder);
+            List<Track> queue = folder.tracksDeep();
+            if (queue.isEmpty()) return;
+            tags.requestFolder(folder);
+            if (!folder.isExpanded()) folder.setExpanded(true);
+            pendingPlay = null;
+            player.play(queue, 0);
+            note("playing " + folder.name() + " · " + queue.size() + " tracks");
             rebuildRows();
+            return;
         }
+        if (!folder.isExpanded()) folder.setExpanded(true);
+        prepareTracks(folder, true);
+        rebuildRows();
+    }
+
+    private void beginPlayback(MusicFolder folder) {
+        List<Track> queue = List.copyOf(folder.tracks());
+        if (queue.isEmpty()) return;
+        if (!folder.isExpanded()) folder.setExpanded(true);
         player.play(queue, 0);
         note("playing " + folder.name() + " · " + queue.size() + " tracks");
     }

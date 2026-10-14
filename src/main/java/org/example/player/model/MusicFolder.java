@@ -3,6 +3,7 @@ package org.example.player.model;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** A directory that holds audio files, or leads to one. */
 public final class MusicFolder {
@@ -16,6 +17,12 @@ public final class MusicFolder {
     private volatile boolean tagsRequested;
     /** Set when a reload finds new tracks in a folder that was already probed. */
     private volatile boolean retag;
+    /**
+     * Tracks stay hidden until {@code album.m3u} has been read. The root has
+     * no expand step, so its files are listed anyway.
+     */
+    private volatile boolean orderReady;
+    private final AtomicBoolean ordering = new AtomicBoolean();
 
     public MusicFolder(Path path, String name, MusicFolder parent) {
         this.path = path;
@@ -53,6 +60,23 @@ public final class MusicFolder {
 
     public void toggleExpanded() {
         expanded = !expanded;
+    }
+
+    public boolean isOrderReady() {
+        return orderReady;
+    }
+
+    public void setOrderReady(boolean value) {
+        orderReady = value;
+    }
+
+    /** Starts playlist generation. False when a write for this folder is already running. */
+    public boolean beginOrdering() {
+        return ordering.compareAndSet(false, true);
+    }
+
+    public void endOrdering() {
+        ordering.set(false);
     }
 
     public boolean hasContent() {

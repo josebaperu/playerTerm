@@ -1,5 +1,6 @@
 package org.example.player.audio;
 
+import org.example.player.model.AlbumPlaylist;
 import org.example.player.model.MusicFolder;
 import org.example.player.model.Track;
 
@@ -25,6 +26,36 @@ public final class TagReader implements AutoCloseable {
         t.setDaemon(true);
         return t;
     });
+
+    /**
+     * Reads tags, writes {@code album.m3u} in track-number order when that
+     * file is missing, then runs {@code onReady} so the caller can list tracks
+     * from the file. The callback runs on this reader's thread.
+     */
+    public void writeAlbumOrder(MusicFolder folder, Runnable onReady) {
+        if (folder == null) {
+            if (onReady != null) onReady.run();
+            return;
+        }
+        List<Track> tracks = List.copyOf(folder.tracks());
+        folder.markTagsRequested();
+        workers.submit(() -> {
+            try {
+                if (!AlbumPlaylist.exists(folder)) {
+                    for (Track track : tracks) {
+                        if (Thread.currentThread().isInterrupted()) return;
+                        read(track);
+                    }
+                    AlbumPlaylist.write(folder, AlbumPlaylist.sequenced(tracks));
+                }
+            } catch (IOException e) {
+                // The folder is still shown, in filename order, and the next
+                // expand tries the write again.
+            } finally {
+                if (onReady != null) onReady.run();
+            }
+        });
+    }
 
     /** Queues a folder's tracks, unless they were requested already. */
     public void requestFolder(MusicFolder folder) {

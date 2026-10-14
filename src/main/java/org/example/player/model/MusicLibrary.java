@@ -137,6 +137,8 @@ public final class MusicLibrary {
         }
         folder.tracks().clear();
         folder.tracks().addAll(nextTracks);
+        // An open folder keeps the order recorded in album.m3u across reloads.
+        if (folder.isOrderReady()) AlbumPlaylist.apply(folder);
         // Titles for files that arrived in a folder the user already opened.
         // A folder that was never expanded stays unread.
         if (added && (folder.tagsRequested() || folder.isExpanded())) {
@@ -216,6 +218,9 @@ public final class MusicLibrary {
             out.add(Row.folder(child, depth));
             if (child.isExpanded()) appendChildren(child, depth + 1, out);
         }
+        // Hold the track rows back until album.m3u has been written and read.
+        // The library root is not expanded by the user, so its own files stay listed.
+        if (folder.parent() != null && !folder.isOrderReady()) return;
         for (Track track : folder.tracks()) {
             out.add(Row.track(track, folder, depth));
         }
